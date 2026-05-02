@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Morning Dashboard
+Comment=Your daily briefing — devotional, news and weather
+Exec=python3 /home/paul/morning-dashboard/dashboard.py
+Icon=/home/paul/morning-dashboard/icon.png
+Terminal=false
+Categories=Utility;
+StartupNotify=true

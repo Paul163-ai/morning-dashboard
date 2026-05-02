@@ -1,0 +1,8 @@
+credentials.json
+token.json
+prayers.json
+sermons/
+__pycache__/
+*.pyc
+build-dir/
+.flatpak-builder/
