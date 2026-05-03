@@ -118,7 +118,7 @@ def fetch_calendar_events(enabled_cal_ids=None):
             creds.refresh(Request())
         cal = build("calendar", "v3", credentials=creds)
 
-        now   = datetime.datetime.utcnow()
+        now   = datetime.datetime.now(datetime.timezone.utc)
         start = datetime.datetime(now.year, now.month, now.day).isoformat() + "Z"
         end   = (datetime.datetime(now.year, now.month, now.day)
                  + datetime.timedelta(days=7)).isoformat() + "Z"
@@ -235,35 +235,71 @@ def fetch_esv_chapter(book_id, chapter, translation="web"):
 
 # ── Spurgeon helper ──────────────────────────────────────────────────────────
 
-def fetch_spurgeon():
-    """Fetch today's Morning & Evening reading from romans45.org."""
+def fetch_spurgeon(date=None):
+    """Fetch Morning & Evening reading from romans45.org archive."""
     import re
-    results = []
+    if date is None:
+        date = datetime.date.today()
 
-    for url, label in [
-        ("https://www.romans45.org/morn_eve/this_morning.cgi", "☀️ Morning"),
-        ("https://www.romans45.org/morn_eve/this_evening.cgi", "🌙 Evening"),
-    ]:
-        try:
-            r = requests.get(url, timeout=10,
-                             headers={"User-Agent": "Mozilla/5.0 MorningDashboard/1.0"})
-            if r.status_code == 200:
-                text = re.sub(r'<script[^>]*>.*?</script>', '', r.text, flags=re.DOTALL)
-                text = re.sub(r'<style[^>]*>.*?</style>',  '', text,   flags=re.DOTALL)
-                text = re.sub(r'<[^>]+>', ' ', text)
-                text = re.sub(r'&nbsp;', ' ', text)
-                text = re.sub(r'&amp;',  '&', text)
-                text = re.sub(r'&quot;', '"', text)
-                text = re.sub(r'&#\d+;', ' ', text)
-                text = re.sub(r'\s+', ' ', text).strip()
-                if len(text) > 100:
-                    results.append(f"{label}\n\n{text}")
-                else:
-                    results.append(f"{label}\n\nReading not available.")
+    month = date.strftime("%m")
+    day   = date.strftime("%d")
+
+    results = []
+    try:
+        r = requests.get(
+            "https://www.romans45.org/morn_eve/m_e.html",
+            timeout=15,
+            headers={"User-Agent": "Mozilla/5.0 MorningDashboard/1.0"}
+        )
+        if r.status_code != 200:
+            return f"Could not load archive (HTTP {r.status_code})"
+
+        html = r.text
+
+        for period, label in [("AM", "☀️ Morning"), ("PM", "🌙 Evening")]:
+            anchor = f'{month}/{day}/{period}'
+            # Find position of anchor in page
+            pos = html.find(f'"{anchor}"')
+            if pos == -1:
+                pos = html.find(f"'{anchor}'")
+            if pos == -1:
+                results.append(f"{label}\n\nReading not found.")
+                continue
+
+            # Extract a chunk of HTML after the anchor
+            chunk = html[pos:pos + 6000]
+
+            # Replace decorative initial letter images with the actual letter
+            chunk = re.sub(
+                r'<img[^>]+/images/([a-z])\.gif[^>]*>',
+                lambda m: m.group(1).upper(),
+                chunk, flags=re.IGNORECASE
+            )
+
+            # Strip HTML tags
+            text = re.sub(r'<script[^>]*>.*?</script>', '', chunk, flags=re.DOTALL)
+            text = re.sub(r'<style[^>]*>.*?</style>',  '', text,   flags=re.DOTALL)
+            text = re.sub(r'<[^>]+>', ' ', text)
+            text = re.sub(r'&nbsp;', ' ', text)
+            text = re.sub(r'&amp;',  '&', text)
+            text = re.sub(r'&quot;', '"', text)
+            text = re.sub(r'&#\d+;', ' ', text)
+            text = re.sub(r'\s+', ' ', text).strip()
+
+            # Trim to next anchor boundary (next date entry)
+            next_anchor = re.search(r'\d\d/\d\d/[AP]M', text[10:])
+            if next_anchor:
+                text = text[:next_anchor.start() + 10]
+
+            if len(text) > 50:
+                # Strip the anchor reference from the start e.g. name="05/03/AM">
+                text = re.sub(r'^[^>]*>\s*', '', text)
+                results.append(f"{label}\n\n{text[:3000]}")
             else:
-                results.append(f"{label}\n\nCould not load (HTTP {r.status_code})")
-        except Exception as e:
-            results.append(f"{label}\n\nError: {e}")
+                results.append(f"{label}\n\nReading not available.")
+
+    except Exception as e:
+        return f"Error loading reading: {e}"
 
     return "\n\n─────────────────────────────────\n\n".join(results)
 
@@ -912,6 +948,8 @@ class MorningDashboard(Gtk.ApplicationWindow):
     # ── Spurgeon Tab ──────────────────────────────────────────────────────────
 
     def _build_spurgeon_tab(self):
+        self._spurgeon_date = datetime.date.today()
+
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
@@ -919,13 +957,36 @@ class MorningDashboard(Gtk.ApplicationWindow):
         box.add_css_class("tab-content")
         box.set_spacing(8)
 
-        title = Gtk.Label(label="📖  Spurgeon — Morning & Evening")
-        title.add_css_class("section-title")
-        title.set_halign(Gtk.Align.START)
-        box.append(title)
+        # Header row with title and navigation
+        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        toolbar.add_css_class("sermon-toolbar")
+
+        prev_btn = Gtk.Button(label="◀ Prev")
+        prev_btn.add_css_class("sermon-btn")
+        prev_btn.connect("clicked", self._spurgeon_prev)
+        toolbar.append(prev_btn)
+
+        self.spurgeon_date_label = Gtk.Label(
+            label=datetime.date.today().strftime("%A, %d %B %Y")
+        )
+        self.spurgeon_date_label.add_css_class("section-title")
+        self.spurgeon_date_label.set_hexpand(True)
+        self.spurgeon_date_label.set_halign(Gtk.Align.CENTER)
+        toolbar.append(self.spurgeon_date_label)
+
+        next_btn = Gtk.Button(label="Next ▶")
+        next_btn.add_css_class("sermon-btn")
+        next_btn.connect("clicked", self._spurgeon_next)
+        toolbar.append(next_btn)
+
+        today_btn = Gtk.Button(label="Today")
+        today_btn.add_css_class("sermon-btn")
+        today_btn.connect("clicked", self._spurgeon_today)
+        toolbar.append(today_btn)
+
+        box.append(toolbar)
 
         self.spurgeon_buffer = Gtk.TextBuffer()
-        # Create text tags for formatting
         self.spurgeon_buffer.create_tag("bold", weight=Pango.Weight.BOLD)
         self.spurgeon_buffer.create_tag("heading", weight=Pango.Weight.BOLD,
                                         scale=1.2)
@@ -948,8 +1009,27 @@ class MorningDashboard(Gtk.ApplicationWindow):
 
         threading.Thread(target=self._load_spurgeon, daemon=True).start()
 
+    def _spurgeon_prev(self, btn):
+        self._spurgeon_date -= datetime.timedelta(days=1)
+        self._spurgeon_refresh()
+
+    def _spurgeon_next(self, btn):
+        self._spurgeon_date += datetime.timedelta(days=1)
+        self._spurgeon_refresh()
+
+    def _spurgeon_today(self, btn):
+        self._spurgeon_date = datetime.date.today()
+        self._spurgeon_refresh()
+
+    def _spurgeon_refresh(self):
+        self.spurgeon_date_label.set_text(
+            self._spurgeon_date.strftime("%A, %d %B %Y")
+        )
+        self.spurgeon_buffer.set_text("Loading…")
+        threading.Thread(target=self._load_spurgeon, daemon=True).start()
+
     def _load_spurgeon(self):
-        text = fetch_spurgeon()
+        text = fetch_spurgeon(self._spurgeon_date)
         GLib.idle_add(self._set_spurgeon, text)
 
     def _set_spurgeon(self, text):
