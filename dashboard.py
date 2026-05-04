@@ -266,8 +266,16 @@ def fetch_spurgeon(date=None):
                 results.append(f"{label}\n\nReading not found.")
                 continue
 
-            # Extract a chunk of HTML after the anchor
-            chunk = html[pos:pos + 6000]
+            # Find the next anchor position to use as boundary
+            next_pos = html.find('"', pos + 10)
+            # Find next date anchor after current one
+            next_anchor_match = re.search(
+                r'"\d\d/\d\d/[AP]M"', html[pos + 10:]
+            )
+            if next_anchor_match:
+                chunk = html[pos: pos + 10 + next_anchor_match.start()]
+            else:
+                chunk = html[pos: pos + 6000]
 
             # Replace decorative initial letter images with the actual letter
             chunk = re.sub(
@@ -286,14 +294,11 @@ def fetch_spurgeon(date=None):
             text = re.sub(r'&#\d+;', ' ', text)
             text = re.sub(r'\s+', ' ', text).strip()
 
-            # Trim to next anchor boundary (next date entry)
-            next_anchor = re.search(r'\d\d/\d\d/[AP]M', text[10:])
-            if next_anchor:
-                text = text[:next_anchor.start() + 10]
-
             if len(text) > 50:
                 # Strip the anchor reference from the start e.g. name="05/03/AM">
                 text = re.sub(r'^[^>]*>\s*', '', text)
+                # Strip any trailing anchor tag
+                text = re.sub(r'\s*<?\s*a\s+name=.*$', '', text, flags=re.IGNORECASE).strip()
                 results.append(f"{label}\n\n{text[:3000]}")
             else:
                 results.append(f"{label}\n\nReading not available.")
