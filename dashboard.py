@@ -338,8 +338,10 @@ def fetch_news(url):
 
 PREFS_FILE = os.path.expanduser("~/.config/morning-dashboard/prefs.json")
 
+ALL_TABS = ["spurgeon", "news", "weather", "sermons", "calendar", "bible", "prayer", "notes"]
+
 def load_prefs():
-    defaults = {"font_size": 13, "theme": "dark", "weather_location": "", "weather_country": "GB", "enabled_calendars": []}
+    defaults = {"font_size": 13, "theme": "dark", "weather_location": "", "weather_country": "GB", "enabled_calendars": [], "visible_tabs": ALL_TABS[:]}
     try:
         with open(PREFS_FILE) as f:
             data = json.load(f)
@@ -369,6 +371,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self.weather_lat      = self.prefs.get("weather_lat", None)
         self.weather_lon      = self.prefs.get("weather_lon", None)
         self.enabled_calendars = self.prefs.get("enabled_calendars", [])
+        self.visible_tabs = self.prefs.get("visible_tabs", ALL_TABS[:])
 
         # Dynamic CSS provider (rebuilt when settings change)
         self.css_provider = Gtk.CssProvider()
@@ -412,6 +415,31 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self._build_calendar_tab()
         self._build_bible_tab()
         self._build_prayer_tab()
+        self._build_notes_tab()
+
+        # Map tab keys to notebook page indices (order must match build order above)
+        self._tab_pages = {
+            "spurgeon": 0,
+            "news":     1,
+            "weather":  2,
+            "sermons":  3,
+            "calendar": 4,
+            "bible":    5,
+            "prayer":   6,
+            "notes":    7,
+        }
+        self._apply_tab_visibility()
+
+    # ── Tab visibility ────────────────────────────────────────────────────────
+
+    def _apply_tab_visibility(self):
+        """Show/hide notebook pages based on self.visible_tabs."""
+        # Must keep at least one tab visible
+        visible = self.visible_tabs if self.visible_tabs else ALL_TABS[:]
+        for key, idx in self._tab_pages.items():
+            page = self.notebook.get_nth_page(idx)
+            if page:
+                page.set_visible(key in visible)
 
     # ── CSS ───────────────────────────────────────────────────────────────────
 
@@ -864,7 +892,35 @@ class MorningDashboard(Gtk.ApplicationWindow):
         auto_btn.connect("clicked", on_auto)
         box.append(auto_btn)
 
-        # Calendar selection
+        # ── Tabs to show ──────────────────────────────────────────────────────
+        tabs_header = Gtk.Label(label="TABS TO SHOW")
+        tabs_header.add_css_class("source-label")
+        tabs_header.set_halign(Gtk.Align.START)
+        box.append(tabs_header)
+
+        TAB_LABELS = {
+            "spurgeon": "📖 Devotional",
+            "news":     "📰 News",
+            "weather":  "🌤️ Weather",
+            "sermons":  "✍️ Sermons",
+            "calendar": "📅 Calendar",
+            "bible":    "📜 Bible",
+            "prayer":   "🙏 Prayer",
+            "notes":    "📝 Notes",
+        }
+        tab_checks = {}
+        for key, label in TAB_LABELS.items():
+            check = Gtk.CheckButton(label=label)
+            check.set_active(key in self.visible_tabs)
+            tab_checks[key] = check
+            box.append(check)
+
+        tabs_note = Gtk.Label(label="(At least one tab must remain visible)")
+        tabs_note.add_css_class("date-label")
+        tabs_note.set_halign(Gtk.Align.START)
+        box.append(tabs_note)
+
+        # ── Calendar selection ────────────────────────────────────────────────
         cal_header = Gtk.Label(label="CALENDARS TO SHOW")
         cal_header.add_css_class("source-label")
         cal_header.set_halign(Gtk.Align.START)
@@ -890,13 +946,15 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 lbl.set_halign(Gtk.Align.START)
                 box.insert_child_after(lbl, cal_header)
                 return
+            last = cal_header
             for cal_id, cal_name in cals:
                 check = Gtk.CheckButton(label=cal_name)
                 active = (not self.enabled_calendars or
                           cal_id in self.enabled_calendars)
                 check.set_active(active)
                 cal_checks[cal_id] = check
-                box.append(check)
+                box.insert_child_after(check, last)
+                last = check
 
         threading.Thread(target=load_cals, daemon=True).start()
 
@@ -914,6 +972,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
             selected_location.get("lat"),
             selected_location.get("lon"),
             [cal_id for cal_id, check in cal_checks.items() if check.get_active()],
+            [key for key, check in tab_checks.items() if check.get_active()] or ALL_TABS[:],
             dialog
         ))
         btn_row.append(cancel_btn)
@@ -924,13 +983,14 @@ class MorningDashboard(Gtk.ApplicationWindow):
         dialog.set_child(outer)
         dialog.present()
 
-    def _save_prefs(self, font_size, theme, weather_location, weather_lat, weather_lon, enabled_calendars, dialog):
+    def _save_prefs(self, font_size, theme, weather_location, weather_lat, weather_lon, enabled_calendars, visible_tabs, dialog):
         self.font_size = font_size
         self.theme = theme
         self.weather_location = weather_location
         self.weather_lat = weather_lat
         self.weather_lon = weather_lon
         self.enabled_calendars = enabled_calendars
+        self.visible_tabs = visible_tabs
         self.prefs.update({
             "font_size": font_size,
             "theme": theme,
@@ -938,9 +998,11 @@ class MorningDashboard(Gtk.ApplicationWindow):
             "weather_lat": weather_lat,
             "weather_lon": weather_lon,
             "enabled_calendars": enabled_calendars,
+            "visible_tabs": visible_tabs,
         })
         save_prefs(self.prefs)
         self._apply_css()
+        self._apply_tab_visibility()
         # Force GTK to re-render all widgets with new styles
         self.queue_draw()
         child = self.get_child()
@@ -1851,6 +1913,61 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self.prayers = [p for p in self.prayers if not p.get("done")]
         self._prayer_save()
         self._prayer_render()
+
+    # ── Notes tab ─────────────────────────────────────────────────────────────
+
+    def _build_notes_tab(self):
+        NOTES_FILE = os.path.expanduser("~/.config/morning-dashboard/notes.txt")
+        self._notes_file = NOTES_FILE
+        self._notes_save_id = None
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        outer.add_css_class("tab-content")
+        outer.set_spacing(8)
+
+        title = Gtk.Label(label="📝  Notes")
+        title.add_css_class("section-title")
+        title.set_halign(Gtk.Align.START)
+        outer.append(title)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+
+        self.notes_view = Gtk.TextView()
+        self.notes_view.set_wrap_mode(Gtk.WrapMode.WORD)
+        self.notes_view.add_css_class("bible-verse")
+        self.notes_view.set_left_margin(8)
+        self.notes_view.set_right_margin(8)
+        self.notes_view.set_top_margin(8)
+        self.notes_view.set_bottom_margin(8)
+
+        try:
+            with open(NOTES_FILE) as f:
+                self.notes_view.get_buffer().set_text(f.read())
+        except FileNotFoundError:
+            pass
+
+        self.notes_view.get_buffer().connect("changed", self._notes_on_change)
+
+        scroll.set_child(self.notes_view)
+        outer.append(scroll)
+
+        self.notebook.append_page(outer, Gtk.Label(label="📝 Notes"))
+
+    def _notes_on_change(self, buf):
+        if self._notes_save_id is not None:
+            GLib.source_remove(self._notes_save_id)
+        self._notes_save_id = GLib.timeout_add(1000, self._notes_save)
+
+    def _notes_save(self):
+        self._notes_save_id = None
+        buf = self.notes_view.get_buffer()
+        text = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True)
+        os.makedirs(os.path.dirname(self._notes_file), exist_ok=True)
+        with open(self._notes_file, "w") as f:
+            f.write(text)
+        return False
 
 # ── App entry point ───────────────────────────────────────────────────────────
 
