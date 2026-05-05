@@ -360,7 +360,6 @@ def save_prefs(prefs):
 class MorningDashboard(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="☀️  Morning Dashboard")
-        self.set_default_size(900, 650)
         self.set_resizable(True)
         self.set_size_request(600, 400)
 
@@ -373,6 +372,14 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self.enabled_calendars = self.prefs.get("enabled_calendars", [])
         self.visible_tabs = self.prefs.get("visible_tabs", ALL_TABS[:])
         self.tab_order = self.prefs.get("tab_order", ALL_TABS[:])
+
+        # Restore window size
+        win_w = self.prefs.get("window_width", 900)
+        win_h = self.prefs.get("window_height", 650)
+        self.set_default_size(win_w, win_h)
+
+        # Save size on close
+        self.connect("close-request", self._on_close_request)
 
         # Dynamic CSS provider (rebuilt when settings change)
         self.css_provider = Gtk.CssProvider()
@@ -404,10 +411,57 @@ class MorningDashboard(Gtk.ApplicationWindow):
         header.append(prefs_btn)
         root.append(header)
 
-        # Notebook (tabs)
-        self.notebook = Gtk.Notebook()
-        self.notebook.set_vexpand(True)
-        root.append(self.notebook)
+        # Main body: sidebar + content stack
+        body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        body.set_vexpand(True)
+        root.append(body)
+
+        # Sidebar: fixed icon column + collapsible label revealer
+        self._sidebar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        self._sidebar.add_css_class("sidebar")
+        self._sidebar.set_vexpand(True)
+        body.append(self._sidebar)
+
+        # Icon column (always visible, fixed width)
+        self._icon_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self._icon_col.add_css_class("sidebar-icon-col")
+        self._icon_col.set_vexpand(True)
+        self._sidebar.append(self._icon_col)
+
+        # Label column inside a Revealer (slides in/out)
+        self._label_revealer = Gtk.Revealer()
+        self._label_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_RIGHT)
+        self._label_revealer.set_transition_duration(200)
+        self._label_revealer.set_reveal_child(True)
+        self._label_revealer.set_hexpand(False)
+
+        self._label_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self._label_col.add_css_class("sidebar-label-col")
+        self._label_col.set_vexpand(True)
+        self._label_revealer.set_child(self._label_col)
+        self._sidebar.append(self._label_revealer)
+
+        # Content stack
+        self.stack = Gtk.Stack()
+        self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self.stack.set_transition_duration(150)
+        self.stack.set_hexpand(True)
+        self.stack.set_vexpand(True)
+        body.append(self.stack)
+
+        # Tab definitions: key -> (emoji, label, accent colour)
+        self._tab_meta = {
+            "spurgeon": ("📖", "Devotional", "#f0a500"),
+            "news":     ("📰", "News",       "#4a9eff"),
+            "weather":  ("🌤️", "Weather",    "#00bcd4"),
+            "sermons":  ("✍️", "Sermons",    "#66bb6a"),
+            "calendar": ("📅", "Calendar",   "#ab47bc"),
+            "bible":    ("📜", "Bible",      "#ffd54f"),
+            "prayer":   ("🙏", "Prayer",     "#ef5350"),
+            "notes":    ("📝", "Notes",      "#ff7043"),
+        }
+        self._sidebar_buttons = {}    # key -> (icon_row, icon_btn, label_btn)
+        self._sidebar_indicators = {} # key -> indicator Box
 
         self._build_spurgeon_tab()
         self._build_news_tab()
@@ -418,34 +472,144 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self._build_prayer_tab()
         self._build_notes_tab()
 
-        # Store page widgets by key for ordering and visibility
-        self._tab_widgets = {
-            "spurgeon": self.notebook.get_nth_page(0),
-            "news":     self.notebook.get_nth_page(1),
-            "weather":  self.notebook.get_nth_page(2),
-            "sermons":  self.notebook.get_nth_page(3),
-            "calendar": self.notebook.get_nth_page(4),
-            "bible":    self.notebook.get_nth_page(5),
-            "prayer":   self.notebook.get_nth_page(6),
-            "notes":    self.notebook.get_nth_page(7),
-        }
+        # Store page widgets by key
+        self._tab_widgets = {key: self.stack.get_child_by_name(key) for key in self._tab_meta}
+
+        self._build_sidebar_buttons()
         self._apply_tab_order()
         self._apply_tab_visibility()
 
+        # Show first visible tab
+        for key in self.tab_order:
+            if key in self.visible_tabs:
+                self._switch_tab(key)
+                break
+
     # ── Tab ordering and visibility ───────────────────────────────────────────
 
+    def _build_sidebar_buttons(self):
+        """Create sidebar buttons split across icon column and label column."""
+        for key, (emoji, label, accent) in self._tab_meta.items():
+            # Icon button (in fixed icon column)
+            icon_btn = Gtk.Button(label=emoji)
+            icon_btn.add_css_class("sidebar-icon-btn")
+            icon_btn.set_tooltip_text(label)
+            icon_btn.connect("clicked", lambda b, k=key: self._switch_tab(k))
+
+            # Indicator bar sits to the left of the icon button
+            indicator = Gtk.Box()
+            indicator.set_size_request(3, -1)
+            indicator.add_css_class("sidebar-indicator")
+            indicator.add_css_class(f"sidebar-indicator-{key}")
+            indicator.set_visible(False)
+
+            icon_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+            icon_row.append(indicator)
+            icon_row.append(icon_btn)
+            self._icon_col.append(icon_row)
+
+            # Label button (in collapsible label column)
+            label_btn = Gtk.Button(label=label)
+            label_btn.add_css_class("sidebar-label-btn")
+            label_btn.set_halign(Gtk.Align.FILL)
+            label_btn.set_hexpand(True)
+            label_btn.connect("clicked", lambda b, k=key: self._switch_tab(k))
+            self._label_col.append(label_btn)
+
+            self._sidebar_buttons[key] = (icon_row, icon_btn, label_btn)
+            self._sidebar_indicators[key] = indicator
+
+        # Spacer + collapse button in icon column
+        spacer = Gtk.Box()
+        spacer.set_vexpand(True)
+        self._icon_col.append(spacer)
+
+        self._sidebar_collapsed = False
+        self._collapse_btn = Gtk.Button(label="◀")
+        self._collapse_btn.add_css_class("sidebar-collapse-btn")
+        self._collapse_btn.set_tooltip_text("Collapse sidebar")
+        self._collapse_btn.connect("clicked", self._toggle_sidebar)
+        self._icon_col.append(self._collapse_btn)
+
+        # Matching spacer in label column so heights align
+        label_spacer = Gtk.Box()
+        label_spacer.set_vexpand(True)
+        self._label_col.append(label_spacer)
+
+    def _toggle_sidebar(self, btn):
+        """Collapse/expand the label column via Revealer."""
+        self._sidebar_collapsed = not self._sidebar_collapsed
+        self._label_revealer.set_reveal_child(not self._sidebar_collapsed)
+        if self._sidebar_collapsed:
+            self._collapse_btn.set_label("▶")
+            self._collapse_btn.set_tooltip_text("Expand sidebar")
+        else:
+            self._collapse_btn.set_label("◀")
+            self._collapse_btn.set_tooltip_text("Collapse sidebar")
+
+    def _switch_tab(self, key):
+        """Switch stack to key and update sidebar active state."""
+        self.stack.set_visible_child_name(key)
+        self._active_tab = key
+        for k, (icon_row, icon_btn, label_btn) in self._sidebar_buttons.items():
+            indicator = self._sidebar_indicators.get(k)
+            active = (k == key)
+            if active:
+                icon_btn.add_css_class("sidebar-icon-btn-active")
+                label_btn.add_css_class("sidebar-label-btn-active")
+                if indicator:
+                    indicator.set_visible(True)
+            else:
+                icon_btn.remove_css_class("sidebar-icon-btn-active")
+                label_btn.remove_css_class("sidebar-label-btn-active")
+                if indicator:
+                    indicator.set_visible(False)
+
     def _apply_tab_order(self):
+        """Rebuild sidebar buttons in current tab_order."""
         order = self.tab_order if self.tab_order else ALL_TABS[:]
-        for position, key in enumerate(order):
-            widget = self._tab_widgets.get(key)
-            if widget:
-                self.notebook.reorder_child(widget, position)
+        visible = set(self.visible_tabs) if self.visible_tabs else set(ALL_TABS)
+        # Remove all tab rows from both columns
+        for key, (icon_row, icon_btn, label_btn) in self._sidebar_buttons.items():
+            try:
+                self._icon_col.remove(icon_row)
+            except Exception:
+                pass
+            try:
+                self._label_col.remove(label_btn)
+            except Exception:
+                pass
+        # Re-insert in order at top of each column
+        for key in reversed(order):
+            if key not in visible:
+                continue
+            icon_row, icon_btn, label_btn = self._sidebar_buttons[key]
+            self._icon_col.prepend(icon_row)
+            self._label_col.prepend(label_btn)
 
     def _apply_tab_visibility(self):
+        """Show/hide stack pages and rebuild sidebar to match."""
         visible = self.visible_tabs if self.visible_tabs else ALL_TABS[:]
         for key, widget in self._tab_widgets.items():
             if widget:
                 widget.set_visible(key in visible)
+        # Rebuild sidebar (handles both order and visibility)
+        self._apply_tab_order()
+        # If current visible child is now hidden, switch to first visible
+        current = self.stack.get_visible_child_name()
+        if current not in visible:
+            for key in (self.tab_order or ALL_TABS):
+                if key in visible:
+                    self._switch_tab(key)
+                    break
+
+    def _on_close_request(self, *args):
+        """Save window size before closing."""
+        w, h = self.get_width(), self.get_height()
+        self.prefs["window_width"] = w
+        self.prefs["window_height"] = h
+        save_prefs(self.prefs)
+        return False  # allow close to proceed
 
     # ── CSS ───────────────────────────────────────────────────────────────────
 
@@ -495,19 +659,95 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 padding: 4px 12px;
             }}
             .prefs-button:hover {{ background-color: {accent}; color: #ffffff; }}
-            notebook {{ background-color: {bg}; }}
-            notebook tab {{
-                background-color: {tab_bg};
-                color: {subtext};
-                padding: 8px 20px;
+            .sidebar {{
+                background-color: {header_bg};
+                border-right: 1px solid {header_border};
+            }}
+            .sidebar-icon-col {{
+                background-color: {header_bg};
+                padding: 8px 0;
+                min-width: 44px;
+            }}
+            .sidebar-label-col {{
+                background-color: {header_bg};
+                padding: 8px 4px 8px 0;
+                min-width: 130px;
+                max-width: 130px;
+            }}
+            .sidebar-icon-btn {{
+                background-color: transparent;
                 border: none;
+                border-radius: 8px;
+                padding: 8px;
+                font-size: 18px;
+                color: {subtext};
+                min-width: 36px;
+                margin: 2px 4px;
+                transition: background-color 150ms ease;
             }}
-            notebook tab:checked {{
+            .sidebar-icon-btn:hover {{
                 background-color: {tab_active};
-                color: {accent};
-                border-bottom: 2px solid {accent};
             }}
+            .sidebar-icon-btn-active {{
+                background-color: {tab_active};
+                color: {text};
+            }}
+            .sidebar-label-btn {{
+                background-color: transparent;
+                border: none;
+                border-radius: 8px;
+                padding: 8px 12px;
+                font-size: {fs - 1}px;
+                font-weight: bold;
+                color: {subtext};
+                margin: 2px 0;
+                transition: background-color 150ms ease;
+            }}
+            .sidebar-label-btn:hover {{
+                background-color: {tab_active};
+                color: {text};
+            }}
+            .sidebar-label-btn-active {{
+                background-color: {tab_active};
+                color: {text};
+            }}
+            .sidebar-collapse-btn {{
+                background-color: transparent;
+                color: {subtext};
+                border: none;
+                border-radius: 8px;
+                margin: 4px;
+                padding: 6px 8px;
+                font-size: 11px;
+            }}
+            .sidebar-collapse-btn:hover {{
+                background-color: {tab_active};
+                color: {text};
+            }}
+            .sidebar-emoji {{ font-size: 18px; }}
+            .sidebar-label {{ font-size: {fs - 1}px; font-weight: bold; }}
+            .sidebar-indicator {{ border-radius: 2px; }}
+            .sidebar-indicator-spurgeon {{ background-color: #f0a500; }}
+            .sidebar-indicator-news     {{ background-color: #4a9eff; }}
+            .sidebar-indicator-weather  {{ background-color: #00bcd4; }}
+            .sidebar-indicator-sermons  {{ background-color: #66bb6a; }}
+            .sidebar-indicator-calendar {{ background-color: #ab47bc; }}
+            .sidebar-indicator-bible    {{ background-color: #ffd54f; }}
+            .sidebar-indicator-prayer   {{ background-color: #ef5350; }}
+            .sidebar-indicator-notes    {{ background-color: #ff7043; }}
             .tab-content {{ background-color: {bg}; padding: 20px; }}
+            .card {{
+                background-color: {tab_active};
+                border-radius: 12px;
+                padding: 16px 20px;
+                margin-bottom: 8px;
+            }}
+            .card-subtle {{
+                background-color: {header_bg};
+                border-radius: 10px;
+                padding: 12px 16px;
+                margin-bottom: 6px;
+            }}
             .section-title {{
                 font-size: 16px; font-weight: bold;
                 color: {accent}; margin-bottom: 10px;
@@ -1326,7 +1566,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         paned.set_resize_end_child(True)
         paned.set_shrink_end_child(False)
 
-        self.notebook.append_page(paned, Gtk.Label(label="📖 Devotional"))
+        self.stack.add_named(paned, "spurgeon")
 
         self._spurgeon_notes_load()
         threading.Thread(target=self._load_spurgeon, daemon=True).start()
@@ -1496,11 +1736,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self.spurgeon_view.set_cursor(cursor)
 
     def _open_bible_ref(self, book_idx, chapter):
-        bible_page = self._tab_widgets.get("bible")
-        if bible_page:
-            page_num = self.notebook.page_num(bible_page)
-            if page_num >= 0:
-                self.notebook.set_current_page(page_num)
+        self._switch_tab("bible")
         self.bible_book_combo.set_selected(book_idx)
         self.bible_chapter_spin.set_value(chapter)
         self._do_load_bible(book_idx, chapter)
@@ -1597,7 +1833,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self.news_box.append(loading)
 
         scroll.set_child(self.news_box)
-        self.notebook.append_page(scroll, Gtk.Label(label="📰 News"))
+        self.stack.add_named(scroll, "news")
 
         threading.Thread(target=self._load_news, daemon=True).start()
 
@@ -1676,7 +1912,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self.weather_outer.append(note)
 
         scroll.set_child(self.weather_outer)
-        self.notebook.append_page(scroll, Gtk.Label(label="🌤️ Weather"))
+        self.stack.add_named(scroll, "weather")
         threading.Thread(target=self._load_weather, daemon=True).start()
 
     def _load_weather(self):
@@ -1885,7 +2121,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         outer.append(left)
         outer.append(right)
 
-        self.notebook.append_page(outer, Gtk.Label(label="✍️ Sermons"))
+        self.stack.add_named(outer, "sermons")
         self._refresh_sermon_list()
 
     def _refresh_sermon_list(self):
@@ -1989,7 +2225,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self.cal_box.append(self.cal_status)
 
         scroll.set_child(self.cal_box)
-        self.notebook.append_page(scroll, Gtk.Label(label="📅 Calendar"))
+        self.stack.add_named(scroll, "calendar")
         threading.Thread(target=self._load_calendar, daemon=True).start()
 
     def _load_calendar(self):
@@ -2148,7 +2384,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         scroll.set_child(self.bible_view)
         outer.append(scroll)
 
-        self.notebook.append_page(outer, Gtk.Label(label="📜 Bible"))
+        self.stack.add_named(outer, "bible")
 
         # Load Genesis 1 by default
         self._do_load_bible(0, 1)
@@ -2262,7 +2498,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         scroll.set_child(self.prayer_list_box)
         outer.append(scroll)
 
-        self.notebook.append_page(outer, Gtk.Label(label="🙏 Prayer"))
+        self.stack.add_named(outer, "prayer")
         self._prayer_load()
 
     def _prayer_load(self):
@@ -2457,7 +2693,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         scroll.set_child(self.notes_view)
         outer.append(scroll)
 
-        self.notebook.append_page(outer, Gtk.Label(label="📝 Notes"))
+        self.stack.add_named(outer, "notes")
 
     def _notes_on_change(self, buf):
         if self._notes_save_id is not None:
