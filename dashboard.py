@@ -571,14 +571,10 @@ class MorningDashboard(Gtk.ApplicationWindow):
         visible = set(self.visible_tabs) if self.visible_tabs else set(ALL_TABS)
         # Remove all tab rows from both columns
         for key, (icon_row, icon_btn, label_btn) in self._sidebar_buttons.items():
-            try:
+            if icon_row.get_parent() == self._icon_col:
                 self._icon_col.remove(icon_row)
-            except Exception:
-                pass
-            try:
+            if label_btn.get_parent() == self._label_col:
                 self._label_col.remove(label_btn)
-            except Exception:
-                pass
         # Re-insert in order at top of each column
         for key in reversed(order):
             if key not in visible:
@@ -672,7 +668,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 background-color: {header_bg};
                 padding: 8px 4px 8px 0;
                 min-width: 130px;
-                max-width: 130px;
+
             }}
             .sidebar-icon-btn {{
                 background-color: transparent;
