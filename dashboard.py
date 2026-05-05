@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import gi
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk, GLib, Pango, Gio
+from gi.repository import Gtk, Gdk, GLib, Pango, Gio
 import requests
 import datetime
 import threading
@@ -463,18 +463,18 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self.css_provider = Gtk.CssProvider()
 
         # Colours
-        bg          = "#1a1a2e" if dark else "#f0f0f5"
-        header_bg   = "#16213e" if dark else "#dde3f0"
-        header_border = "#0f3460" if dark else "#b0bcd8"
+        bg          = "#1a1a2e" if dark else "#f4f4f8"
+        header_bg   = "#16213e" if dark else "#e8eaf2"
+        header_border = "#0f3460" if dark else "#c8cde0"
         text        = "#e0e0e0" if dark else "#1a1a2e"
         subtext     = "#a0a0c0" if dark else "#555570"
         reading     = "#d0d0e8" if dark else "#2a2a3e"
-        tab_bg      = "#16213e" if dark else "#dde3f0"
-        tab_active  = "#0f3460" if dark else "#c0ccec"
+        tab_bg      = "#16213e" if dark else "#e8eaf2"
+        tab_active  = "#0f3460" if dark else "#ffffff"
         accent      = "#e94560" if dark else "#c0392b"
-        btn_bg      = "#0f3460" if dark else "#c0ccec"
+        btn_bg      = "#0f3460" if dark else "#dde2f0"
         news_text   = "#c0c0e0" if dark else "#333355"
-        weather_bg  = "#16213e" if dark else "#dde3f0"
+        weather_bg  = "#16213e" if dark else "#eef0f8"
         status_col  = "#6060a0" if dark else "#8888aa"
 
         css = f"""
@@ -569,7 +569,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
             }}
             .sermon-btn {{
                 background-color: {btn_bg};
-                color: {subtext};
+                color: {text};
                 font-size: 12px;
                 border: none;
                 border-radius: 6px;
@@ -577,6 +577,16 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 margin-left: 4px;
             }}
             .sermon-btn:hover {{ background-color: {accent}; color: #ffffff; }}
+            .cancel-btn {{
+                background-color: {accent};
+                color: #ffffff;
+                font-size: 12px;
+                border: none;
+                border-radius: 6px;
+                padding: 4px 12px;
+                margin-left: 4px;
+            }}
+            .cancel-btn:hover {{ background-color: #ff2244; color: #ffffff; }}
             .sermon-list-item {{
                 background-color: {tab_active};
                 border-radius: 6px;
@@ -637,6 +647,61 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 font-size: {fs}px;
                 text-decoration: line-through;
             }}
+            .prefs-box {{
+                background-color: {bg};
+                color: {text};
+            }}
+            .prefs-box label {{
+                color: {text};
+            }}
+            .prefs-box checkbutton label {{
+                color: {text};
+            }}
+            .prefs-box spinbutton {{
+                background-color: {tab_active};
+                color: {text};
+            }}
+            .prefs-box spinbutton entry {{
+                background-color: {tab_active};
+                color: {text};
+            }}
+            .prefs-box spinbutton entry text {{
+                background-color: {tab_active};
+                color: {text};
+            }}
+            .prefs-box dropdown {{
+                background-color: {btn_bg};
+                color: {text};
+            }}
+            .prefs-box dropdown button {{
+                background-color: {btn_bg};
+                color: {text};
+            }}
+            .prefs-box dropdown button label {{
+                color: {text};
+            }}
+            popover {{
+                background-color: {tab_active};
+                color: {text};
+            }}
+            popover contents {{
+                background-color: {tab_active};
+                color: {text};
+            }}
+            popover listview {{
+                background-color: {tab_active};
+                color: {text};
+            }}
+            popover listview row {{
+                background-color: {tab_active};
+                color: {text};
+            }}
+            popover listview row label {{
+                color: {text};
+            }}
+            popover listview row:hover {{
+                background-color: {btn_bg};
+            }}
             .bible-verse-num {{
                 font-size: {fs - 2}px;
                 color: {accent};
@@ -646,7 +711,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self.css_provider.load_from_data(css)
         Gtk.StyleContext.add_provider_for_display(
             self.get_display(), self.css_provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            Gtk.STYLE_PROVIDER_PRIORITY_USER
         )
 
     def _get_signed_in_account(self):
@@ -727,6 +792,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         outer.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        box.add_css_class("prefs-box")
         box.set_margin_top(20)
         box.set_margin_bottom(20)
         box.set_margin_start(24)
@@ -763,28 +829,56 @@ class MorningDashboard(Gtk.ApplicationWindow):
         box.append(google_row)
 
         # Font size row
+        font_val = {"v": self.font_size}
         font_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         font_lbl = Gtk.Label(label="Reading font size:")
         font_lbl.set_hexpand(True)
         font_lbl.set_halign(Gtk.Align.START)
-        spin = Gtk.SpinButton()
-        spin.set_range(9, 24)
-        spin.set_increments(1, 2)
-        spin.set_value(self.font_size)
-        spin.set_digits(0)
+        dec_btn = Gtk.Button(label="−")
+        dec_btn.add_css_class("sermon-btn")
+        font_size_lbl = Gtk.Label(label=str(self.font_size))
+        font_size_lbl.set_width_chars(3)
+        font_size_lbl.set_halign(Gtk.Align.CENTER)
+        inc_btn = Gtk.Button(label="+")
+        inc_btn.add_css_class("sermon-btn")
+        def on_dec(b):
+            if font_val["v"] > 9:
+                font_val["v"] -= 1
+                font_size_lbl.set_text(str(font_val["v"]))
+        def on_inc(b):
+            if font_val["v"] < 24:
+                font_val["v"] += 1
+                font_size_lbl.set_text(str(font_val["v"]))
+        dec_btn.connect("clicked", on_dec)
+        inc_btn.connect("clicked", on_inc)
         font_row.append(font_lbl)
-        font_row.append(spin)
+        font_row.append(dec_btn)
+        font_row.append(font_size_lbl)
+        font_row.append(inc_btn)
         box.append(font_row)
 
         # Theme row
+        theme_val = {"v": self.theme}
         theme_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         theme_lbl = Gtk.Label(label="Theme:")
         theme_lbl.set_hexpand(True)
         theme_lbl.set_halign(Gtk.Align.START)
-        theme_combo = Gtk.DropDown.new_from_strings(["Dark", "Light"])
-        theme_combo.set_selected(0 if self.theme == "dark" else 1)
+        dark_radio = Gtk.CheckButton(label="Dark")
+        dark_radio.set_active(self.theme == "dark")
+        light_radio = Gtk.CheckButton(label="Light")
+        light_radio.set_active(self.theme == "light")
+        light_radio.set_group(dark_radio)
+        def on_dark_toggled(b):
+            if b.get_active():
+                theme_val["v"] = "dark"
+        def on_light_toggled(b):
+            if b.get_active():
+                theme_val["v"] = "light"
+        dark_radio.connect("toggled", on_dark_toggled)
+        light_radio.connect("toggled", on_light_toggled)
         theme_row.append(theme_lbl)
-        theme_row.append(theme_combo)
+        theme_row.append(dark_radio)
+        theme_row.append(light_radio)
         box.append(theme_row)
 
         # Weather location search
@@ -805,6 +899,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         search_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         loc_entry = Gtk.Entry()
         loc_entry.set_placeholder_text("Type a town or city to search…")
+        loc_entry.add_css_class("sermon-title-entry")
         loc_entry.set_hexpand(True)
         search_btn = Gtk.Button(label="Search")
         search_btn.add_css_class("sermon-btn")
@@ -817,7 +912,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         box.append(loc_results_box)
 
         # Store selected location data
-        selected_location = {"name": self.weather_location, "lat": None, "lon": None}
+        selected_location = {"name": self.weather_location, "lat": self.weather_lat, "lon": self.weather_lon}
 
         def do_search(btn=None):
             query = loc_entry.get_text().strip()
@@ -940,6 +1035,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
 
                 up_btn = Gtk.Button(label="↑")
+                up_btn.add_css_class("sermon-btn")
                 up_btn.set_sensitive(i > 0)
                 up_btn.set_size_request(28, -1)
                 def on_up(b, k=key):
@@ -950,6 +1046,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 up_btn.connect("clicked", on_up)
 
                 down_btn = Gtk.Button(label="↓")
+                down_btn.add_css_class("sermon-btn")
                 down_btn.set_sensitive(i < n - 1)
                 down_btn.set_size_request(28, -1)
                 def on_down(b, k=key):
@@ -1019,24 +1116,44 @@ class MorningDashboard(Gtk.ApplicationWindow):
 
         threading.Thread(target=load_cals, daemon=True).start()
 
+        _state = {"saved": False, "cancelled": False}
+
+        def do_save():
+            if _state["saved"] or _state["cancelled"]:
+                return
+            _state["saved"] = True
+            self._save_prefs(
+                font_val["v"],
+                theme_val["v"],
+                selected_location["name"],
+                selected_location.get("lat"),
+                selected_location.get("lon"),
+                [cal_id for cal_id, check in cal_checks.items() if check.get_active()],
+                list(tab_visible_state) or ALL_TABS[:],
+                tab_order_state[:],
+            )
+
+        def on_close_request(d):
+            do_save()
+            return False
+
+        dialog.connect("close-request", on_close_request)
+
         # Buttons
         btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         btn_row.set_halign(Gtk.Align.END)
         cancel_btn = Gtk.Button(label="Cancel")
-        cancel_btn.connect("clicked", lambda b: dialog.close())
+        cancel_btn.add_css_class("cancel-btn")
+        def on_cancel(b):
+            _state["cancelled"] = True
+            dialog.close()
+        cancel_btn.connect("clicked", on_cancel)
         save_btn = Gtk.Button(label="Save")
         save_btn.add_css_class("suggested-action")
-        save_btn.connect("clicked", lambda b: self._save_prefs(
-            int(spin.get_value()),
-            "dark" if theme_combo.get_selected() == 0 else "light",
-            selected_location["name"],
-            selected_location.get("lat"),
-            selected_location.get("lon"),
-            [cal_id for cal_id, check in cal_checks.items() if check.get_active()],
-            list(tab_visible_state) or ALL_TABS[:],
-            tab_order_state[:],
-            dialog
-        ))
+        def on_save(b):
+            do_save()
+            dialog.close()
+        save_btn.connect("clicked", on_save)
         btn_row.append(cancel_btn)
         btn_row.append(save_btn)
         box.append(btn_row)
@@ -1045,7 +1162,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         dialog.set_child(outer)
         dialog.present()
 
-    def _save_prefs(self, font_size, theme, weather_location, weather_lat, weather_lon, enabled_calendars, visible_tabs, tab_order, dialog):
+    def _save_prefs(self, font_size, theme, weather_location, weather_lat, weather_lon, enabled_calendars, visible_tabs, tab_order):
         self.font_size = font_size
         self.theme = theme
         self.weather_location = weather_location
@@ -1075,7 +1192,6 @@ class MorningDashboard(Gtk.ApplicationWindow):
             child.queue_draw()
         threading.Thread(target=self._load_weather, daemon=True).start()
         threading.Thread(target=self._load_calendar, daemon=True).start()
-        dialog.close()
 
     # ── Spurgeon Tab ──────────────────────────────────────────────────────────
 
@@ -1854,6 +1970,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
     def _build_prayer_tab(self):
         PRAYER_FILE = os.path.expanduser("~/morning-dashboard/prayers.json")
         self.prayer_file = PRAYER_FILE
+        self._prayer_adding_child_for = None
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         outer.add_css_class("tab-content")
@@ -1914,22 +2031,30 @@ class MorningDashboard(Gtk.ApplicationWindow):
             json.dump(self.prayers, f, indent=2)
 
     def _prayer_render(self):
-        # Clear existing
         child = self.prayer_list_box.get_first_child()
         while child:
             nxt = child.get_next_sibling()
             self.prayer_list_box.remove(child)
             child = nxt
 
-        # Sort — undone first, done at bottom
         undone = [p for p in self.prayers if not p.get("done")]
         done   = [p for p in self.prayers if p.get("done")]
 
         for prayer in undone + done:
             self._prayer_add_row(prayer)
+            for sub in prayer.get("children", []):
+                if not sub.get("done"):
+                    self._prayer_add_row(sub, parent=prayer, indented=True)
+            if self._prayer_adding_child_for is prayer:
+                self._prayer_child_entry_row(prayer)
 
-    def _prayer_add_row(self, prayer):
+    def _prayer_add_row(self, prayer, parent=None, indented=False):
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+
+        if indented:
+            spacer = Gtk.Box()
+            spacer.set_size_request(28, -1)
+            row.append(spacer)
 
         check = Gtk.CheckButton()
         check.set_active(prayer.get("done", False))
@@ -1948,12 +2073,70 @@ class MorningDashboard(Gtk.ApplicationWindow):
 
         del_btn = Gtk.Button(label="✕")
         del_btn.add_css_class("sermon-btn")
-        del_btn.connect("clicked", self._prayer_delete, prayer)
+        del_btn.connect("clicked", self._prayer_delete, prayer, parent)
 
         row.append(check)
         row.append(lbl)
+
+        if not indented:
+            sub_btn = Gtk.Button(label="+ sub")
+            sub_btn.add_css_class("sermon-btn")
+            sub_btn.connect("clicked", lambda b, p=prayer: self._prayer_start_add_child(p))
+            row.append(sub_btn)
+
         row.append(del_btn)
         self.prayer_list_box.append(row)
+
+    def _prayer_child_entry_row(self, parent_prayer):
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        spacer = Gtk.Box()
+        spacer.set_size_request(28, -1)
+        row.append(spacer)
+
+        entry = Gtk.Entry()
+        entry.set_placeholder_text("Name or request…")
+        entry.set_hexpand(True)
+        entry.add_css_class("sermon-title-entry")
+
+        def confirm(_=None):
+            text = entry.get_text().strip()
+            if text:
+                parent_prayer.setdefault("children", []).append({"text": text, "done": False})
+                self._prayer_save()
+            self._prayer_adding_child_for = None
+            self._prayer_render()
+
+        def cancel():
+            self._prayer_adding_child_for = None
+            self._prayer_render()
+
+        key_ctrl = Gtk.EventControllerKey()
+        def on_key(ctrl, keyval, keycode, state):
+            if keyval == Gdk.KEY_Escape:
+                cancel()
+                return True
+            return False
+        key_ctrl.connect("key-pressed", on_key)
+        entry.add_controller(key_ctrl)
+        entry.connect("activate", confirm)
+
+        cancel_btn = Gtk.Button(label="Cancel")
+        cancel_btn.add_css_class("sermon-btn")
+        cancel_btn.connect("clicked", lambda b: cancel())
+
+        ok_btn = Gtk.Button(label="Add")
+        ok_btn.add_css_class("sermon-btn")
+        ok_btn.connect("clicked", confirm)
+
+        row.append(entry)
+        row.append(cancel_btn)
+        row.append(ok_btn)
+        self.prayer_list_box.append(row)
+        entry.grab_focus()
+
+    def _prayer_start_add_child(self, parent_prayer):
+        self._prayer_adding_child_for = parent_prayer
+        self._prayer_render()
 
     def _prayer_add(self, widget):
         text = self.prayer_entry.get_text().strip()
@@ -1966,16 +2149,26 @@ class MorningDashboard(Gtk.ApplicationWindow):
 
     def _prayer_toggle(self, check, prayer):
         prayer["done"] = check.get_active()
+        for child in prayer.get("children", []):
+            child["done"] = prayer["done"]
         self._prayer_save()
         self._prayer_render()
 
-    def _prayer_delete(self, btn, prayer):
-        self.prayers = [p for p in self.prayers if p is not prayer]
+    def _prayer_delete(self, btn, prayer, parent=None):
+        if parent is None:
+            self.prayers = [p for p in self.prayers if p is not prayer]
+        else:
+            parent["children"] = [c for c in parent.get("children", []) if c is not prayer]
         self._prayer_save()
         self._prayer_render()
 
     def _prayer_clear_done(self, btn):
-        self.prayers = [p for p in self.prayers if not p.get("done")]
+        new_prayers = []
+        for p in self.prayers:
+            if not p.get("done"):
+                p["children"] = [c for c in p.get("children", []) if not c.get("done")]
+                new_prayers.append(p)
+        self.prayers = new_prayers
         self._prayer_save()
         self._prayer_render()
 
