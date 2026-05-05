@@ -2,6 +2,10 @@
 
 A personal daily briefing app for the Linux desktop, built with Python and GTK4.
 
+## Screenshot
+
+![Morning Dashboard](screenshot.png)
+
 ## Features
 
 - 📖 Spurgeon Morning & Evening devotional
