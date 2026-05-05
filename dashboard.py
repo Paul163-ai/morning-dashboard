@@ -1983,7 +1983,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         title.set_halign(Gtk.Align.START)
         title.set_hexpand(True)
 
-        clear_btn = Gtk.Button(label="✓ Clear prayed")
+        clear_btn = Gtk.Button(label="↺ Reset prayers")
         clear_btn.add_css_class("sermon-btn")
         clear_btn.connect("clicked", self._prayer_clear_done)
         header_row.append(title)
@@ -2163,12 +2163,10 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self._prayer_render()
 
     def _prayer_clear_done(self, btn):
-        new_prayers = []
         for p in self.prayers:
-            if not p.get("done"):
-                p["children"] = [c for c in p.get("children", []) if not c.get("done")]
-                new_prayers.append(p)
-        self.prayers = new_prayers
+            p["done"] = False
+            for c in p.get("children", []):
+                c["done"] = False
         self._prayer_save()
         self._prayer_render()
 
