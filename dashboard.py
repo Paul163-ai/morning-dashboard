@@ -1197,15 +1197,20 @@ class MorningDashboard(Gtk.ApplicationWindow):
 
     def _build_spurgeon_tab(self):
         self._spurgeon_date = datetime.date.today()
+        self._spurgeon_notes_file = os.path.expanduser(
+            "~/.config/morning-dashboard/spurgeon_notes.json"
+        )
+        self._spurgeon_notes_save_id = None
+        self._spurgeon_notes_loading = False
 
-        scroll = Gtk.ScrolledWindow()
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        # ── Left pane: devotional reading ────────────────────────────────────
+        left_scroll = Gtk.ScrolledWindow()
+        left_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         box.add_css_class("tab-content")
         box.set_spacing(8)
 
-        # Header row with title and navigation
         toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         toolbar.add_css_class("sermon-toolbar")
 
@@ -1234,11 +1239,19 @@ class MorningDashboard(Gtk.ApplicationWindow):
 
         box.append(toolbar)
 
+        self._spurgeon_links = []  # list of (start_offset, end_offset, book_idx, chapter)
+
         self.spurgeon_buffer = Gtk.TextBuffer()
         self.spurgeon_buffer.create_tag("bold", weight=Pango.Weight.BOLD)
         self.spurgeon_buffer.create_tag("heading", weight=Pango.Weight.BOLD,
                                         scale=1.2)
         self.spurgeon_buffer.create_tag("normal")
+        self.spurgeon_buffer.create_tag(
+            "link",
+            weight=Pango.Weight.BOLD,
+            underline=Pango.Underline.SINGLE,
+            foreground="#5599ff",
+        )
 
         self.spurgeon_view = Gtk.TextView(buffer=self.spurgeon_buffer)
         self.spurgeon_view.set_editable(False)
@@ -1249,12 +1262,73 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self.spurgeon_view.set_top_margin(10)
         self.spurgeon_view.set_bottom_margin(10)
         self.spurgeon_view.add_css_class("reading-text")
+
+        click = Gtk.GestureClick.new()
+        click.connect("pressed", self._spurgeon_link_clicked)
+        self.spurgeon_view.add_controller(click)
+
+        motion = Gtk.EventControllerMotion.new()
+        motion.connect("motion", self._spurgeon_motion)
+        self.spurgeon_view.add_controller(motion)
         self.spurgeon_buffer.set_text("Loading today's reading…")
 
         box.append(self.spurgeon_view)
-        scroll.set_child(box)
-        self.notebook.append_page(scroll, Gtk.Label(label="📖 Devotional"))
+        left_scroll.set_child(box)
 
+        # ── Right pane: date-keyed notes ──────────────────────────────────────
+        right_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        right_box.add_css_class("tab-content")
+        right_box.set_spacing(6)
+
+        notes_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+
+        self.spurgeon_notes_date_label = Gtk.Label(
+            label="Notes — " + datetime.date.today().strftime("%A, %d %B %Y")
+        )
+        self.spurgeon_notes_date_label.add_css_class("section-title")
+        self.spurgeon_notes_date_label.set_halign(Gtk.Align.START)
+        self.spurgeon_notes_date_label.set_hexpand(True)
+        notes_header.append(self.spurgeon_notes_date_label)
+
+        export_btn = Gtk.Button(label="Export all…")
+        export_btn.add_css_class("sermon-btn")
+        export_btn.connect("clicked", self._spurgeon_notes_export)
+        notes_header.append(export_btn)
+
+        right_box.append(notes_header)
+
+        notes_scroll = Gtk.ScrolledWindow()
+        notes_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        notes_scroll.set_vexpand(True)
+
+        self.spurgeon_notes_view = Gtk.TextView()
+        self.spurgeon_notes_view.set_wrap_mode(Gtk.WrapMode.WORD)
+        self.spurgeon_notes_view.add_css_class("bible-verse")
+        self.spurgeon_notes_view.set_left_margin(8)
+        self.spurgeon_notes_view.set_right_margin(8)
+        self.spurgeon_notes_view.set_top_margin(8)
+        self.spurgeon_notes_view.set_bottom_margin(8)
+        self.spurgeon_notes_view.get_buffer().connect(
+            "changed", self._spurgeon_notes_on_change
+        )
+
+        notes_scroll.set_child(self.spurgeon_notes_view)
+        right_box.append(notes_scroll)
+
+        # ── Paned container ───────────────────────────────────────────────────
+        paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        paned.set_wide_handle(True)
+        paned.set_start_child(left_scroll)
+        paned.set_end_child(right_box)
+        paned.set_position(700)
+        paned.set_resize_start_child(True)
+        paned.set_shrink_start_child(False)
+        paned.set_resize_end_child(True)
+        paned.set_shrink_end_child(False)
+
+        self.notebook.append_page(paned, Gtk.Label(label="📖 Devotional"))
+
+        self._spurgeon_notes_load()
         threading.Thread(target=self._load_spurgeon, daemon=True).start()
 
     def _spurgeon_prev(self, btn):
@@ -1270,10 +1344,11 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self._spurgeon_refresh()
 
     def _spurgeon_refresh(self):
-        self.spurgeon_date_label.set_text(
-            self._spurgeon_date.strftime("%A, %d %B %Y")
-        )
+        date_str = self._spurgeon_date.strftime("%A, %d %B %Y")
+        self.spurgeon_date_label.set_text(date_str)
+        self.spurgeon_notes_date_label.set_text("Notes — " + date_str)
         self.spurgeon_buffer.set_text("Loading…")
+        self._spurgeon_notes_load()
         threading.Thread(target=self._load_spurgeon, daemon=True).start()
 
     def _load_spurgeon(self):
@@ -1283,6 +1358,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
     def _set_spurgeon(self, text):
         import re
         self.spurgeon_buffer.set_text("")
+        self._spurgeon_links = []
         sections = text.split("\n\n─────────────────────────────────\n\n")
         for i, section in enumerate(sections):
             if i > 0:
@@ -1314,13 +1390,22 @@ class MorningDashboard(Gtk.ApplicationWindow):
                         end, date_match.group(1) + "\n\n", "bold"
                     )
                     rest = date_match.group(2).strip()
-                    # Bold the verse reference (first line of rest)
+                    # Bold the verse reference (first line of rest) and hyperlink it
                     verse_end = rest.find("\n")
                     end = self.spurgeon_buffer.get_end_iter()
                     if verse_end > 0:
-                        self.spurgeon_buffer.insert_with_tags_by_name(
-                            end, rest[:verse_end] + "\n\n", "bold"
-                        )
+                        verse_ref = rest[:verse_end]
+                        start_off = self.spurgeon_buffer.get_end_iter().get_offset()
+                        self.spurgeon_buffer.insert_with_tags_by_name(end, verse_ref, "bold")
+                        end_off = self.spurgeon_buffer.get_end_iter().get_offset()
+                        s_it = self.spurgeon_buffer.get_iter_at_offset(start_off)
+                        e_it = self.spurgeon_buffer.get_iter_at_offset(end_off)
+                        self.spurgeon_buffer.apply_tag_by_name("link", s_it, e_it)
+                        ref = self._parse_spurgeon_ref(verse_ref)
+                        if ref:
+                            self._spurgeon_links.append((start_off, end_off, ref[0], ref[1]))
+                        end = self.spurgeon_buffer.get_end_iter()
+                        self.spurgeon_buffer.insert_with_tags_by_name(end, "\n\n", "bold")
                         end = self.spurgeon_buffer.get_end_iter()
                         self.spurgeon_buffer.insert_with_tags_by_name(
                             end, rest[verse_end:].strip(), "normal"
@@ -1330,9 +1415,172 @@ class MorningDashboard(Gtk.ApplicationWindow):
                             end, rest, "normal"
                         )
                 else:
-                    self.spurgeon_buffer.insert_with_tags_by_name(
-                        end, body, "normal"
+                    # Format: "<quote>" Book Chapter:Verse. rest of text
+                    ref_m = re.search(
+                        r'"([^"]+)"\s+'
+                        r'((?:\d+\s+)?[A-Z][a-z]+(?:\s+(?:of|the)\s+[A-Z][a-z]+)?'
+                        r'\s+\d+:\d+[-\d–]*)'
+                        r'\.',
+                        body
                     )
+                    if ref_m:
+                        pre = body[:ref_m.start(2)]
+                        verse_ref = ref_m.group(2)
+                        post = body[ref_m.end():]
+                        self.spurgeon_buffer.insert_with_tags_by_name(end, pre, "normal")
+                        start_off = self.spurgeon_buffer.get_end_iter().get_offset()
+                        end = self.spurgeon_buffer.get_end_iter()
+                        self.spurgeon_buffer.insert_with_tags_by_name(end, verse_ref, "bold")
+                        end_off = self.spurgeon_buffer.get_end_iter().get_offset()
+                        s_it = self.spurgeon_buffer.get_iter_at_offset(start_off)
+                        e_it = self.spurgeon_buffer.get_iter_at_offset(end_off)
+                        self.spurgeon_buffer.apply_tag_by_name("link", s_it, e_it)
+                        ref = self._parse_spurgeon_ref(verse_ref)
+                        if ref:
+                            self._spurgeon_links.append((start_off, end_off, ref[0], ref[1]))
+                        end = self.spurgeon_buffer.get_end_iter()
+                        self.spurgeon_buffer.insert_with_tags_by_name(end, "." + post, "normal")
+                    else:
+                        self.spurgeon_buffer.insert_with_tags_by_name(end, body, "normal")
+
+    def _parse_spurgeon_ref(self, text):
+        import re
+        m = re.match(r'^(.+?)\s+(\d+)(?::\d+[\d–-]*)?', text.strip())
+        if not m:
+            return None
+        book_str = m.group(1).strip().lower()
+        chapter = int(m.group(2))
+        aliases = {
+            "psalm": "psalms",
+            "song of songs": "song of solomon",
+            "song": "song of solomon",
+            "the song of solomon": "song of solomon",
+            "revelation of john": "revelation",
+        }
+        book_str = aliases.get(book_str, book_str)
+        for idx, (name, _, max_ch) in enumerate(BIBLE_BOOKS):
+            if name.lower() == book_str:
+                return (idx, min(chapter, max_ch))
+        # prefix fallback
+        for idx, (name, _, max_ch) in enumerate(BIBLE_BOOKS):
+            if name.lower().startswith(book_str) or book_str.startswith(name.lower()):
+                return (idx, min(chapter, max_ch))
+        return None
+
+    def _spurgeon_link_clicked(self, gesture, n_press, x, y):
+        bx, by = self.spurgeon_view.window_to_buffer_coords(
+            Gtk.TextWindowType.WIDGET, int(x), int(y)
+        )
+        ok, it = self.spurgeon_view.get_iter_at_location(bx, by)
+        if not ok:
+            return
+        link_tag = self.spurgeon_buffer.get_tag_table().lookup("link")
+        if not it.has_tag(link_tag):
+            return
+        offset = it.get_offset()
+        for start_off, end_off, book_idx, chapter in self._spurgeon_links:
+            if start_off <= offset < end_off:
+                self._open_bible_ref(book_idx, chapter)
+                break
+
+    def _spurgeon_motion(self, controller, x, y):
+        bx, by = self.spurgeon_view.window_to_buffer_coords(
+            Gtk.TextWindowType.WIDGET, int(x), int(y)
+        )
+        ok, it = self.spurgeon_view.get_iter_at_location(bx, by)
+        link_tag = self.spurgeon_buffer.get_tag_table().lookup("link")
+        if ok and it.has_tag(link_tag):
+            cursor = Gdk.Cursor.new_from_name("pointer", None)
+        else:
+            cursor = Gdk.Cursor.new_from_name("text", None)
+        self.spurgeon_view.set_cursor(cursor)
+
+    def _open_bible_ref(self, book_idx, chapter):
+        bible_page = self._tab_widgets.get("bible")
+        if bible_page:
+            page_num = self.notebook.page_num(bible_page)
+            if page_num >= 0:
+                self.notebook.set_current_page(page_num)
+        self.bible_book_combo.set_selected(book_idx)
+        self.bible_chapter_spin.set_value(chapter)
+        self._do_load_bible(book_idx, chapter)
+
+    def _spurgeon_notes_export(self, btn):
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Export Spurgeon notes")
+        dialog.set_initial_name("spurgeon_notes.txt")
+        f = Gtk.FileFilter()
+        f.set_name("Text files")
+        f.add_pattern("*.txt")
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(f)
+        dialog.set_filters(filters)
+        dialog.save(self, None, self._spurgeon_notes_export_finish)
+
+    def _spurgeon_notes_export_finish(self, dialog, result):
+        try:
+            file = dialog.save_finish(result)
+        except Exception:
+            return
+        if not file:
+            return
+        try:
+            with open(self._spurgeon_notes_file) as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = {}
+        lines = []
+        for key in sorted(data.keys()):
+            try:
+                d = datetime.date.fromisoformat(key)
+                heading = d.strftime("%A, %d %B %Y")
+            except ValueError:
+                heading = key
+            lines.append(f"── {heading} ──\n")
+            lines.append(data[key].strip())
+            lines.append("\n\n")
+        path = file.get_path()
+        with open(path, "w") as f:
+            f.write("\n".join(lines).strip() + "\n")
+
+    def _spurgeon_notes_key(self):
+        return self._spurgeon_date.isoformat()
+
+    def _spurgeon_notes_load(self):
+        self._spurgeon_notes_loading = True
+        try:
+            with open(self._spurgeon_notes_file) as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = {}
+        text = data.get(self._spurgeon_notes_key(), "")
+        self.spurgeon_notes_view.get_buffer().set_text(text)
+        self._spurgeon_notes_loading = False
+
+    def _spurgeon_notes_on_change(self, buf):
+        if self._spurgeon_notes_loading:
+            return
+        if self._spurgeon_notes_save_id is not None:
+            GLib.source_remove(self._spurgeon_notes_save_id)
+        self._spurgeon_notes_save_id = GLib.timeout_add(1000, self._spurgeon_notes_save)
+
+    def _spurgeon_notes_save(self):
+        self._spurgeon_notes_save_id = None
+        buf = self.spurgeon_notes_view.get_buffer()
+        text = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True)
+        try:
+            with open(self._spurgeon_notes_file) as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = {}
+        if text:
+            data[self._spurgeon_notes_key()] = text
+        else:
+            data.pop(self._spurgeon_notes_key(), None)
+        os.makedirs(os.path.dirname(self._spurgeon_notes_file), exist_ok=True)
+        with open(self._spurgeon_notes_file, "w") as f:
+            json.dump(data, f, indent=2)
+        return False
 
     # ── News Tab ──────────────────────────────────────────────────────────────
 
