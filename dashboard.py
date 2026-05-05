@@ -341,7 +341,7 @@ PREFS_FILE = os.path.expanduser("~/.config/morning-dashboard/prefs.json")
 ALL_TABS = ["spurgeon", "news", "weather", "sermons", "calendar", "bible", "prayer", "notes"]
 
 def load_prefs():
-    defaults = {"font_size": 13, "theme": "dark", "weather_location": "", "weather_country": "GB", "enabled_calendars": [], "visible_tabs": ALL_TABS[:]}
+    defaults = {"font_size": 13, "theme": "dark", "weather_location": "", "weather_country": "GB", "enabled_calendars": [], "visible_tabs": ALL_TABS[:], "tab_order": ALL_TABS[:]}
     try:
         with open(PREFS_FILE) as f:
             data = json.load(f)
@@ -372,6 +372,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self.weather_lon      = self.prefs.get("weather_lon", None)
         self.enabled_calendars = self.prefs.get("enabled_calendars", [])
         self.visible_tabs = self.prefs.get("visible_tabs", ALL_TABS[:])
+        self.tab_order = self.prefs.get("tab_order", ALL_TABS[:])
 
         # Dynamic CSS provider (rebuilt when settings change)
         self.css_provider = Gtk.CssProvider()
@@ -417,29 +418,34 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self._build_prayer_tab()
         self._build_notes_tab()
 
-        # Map tab keys to notebook page indices (order must match build order above)
-        self._tab_pages = {
-            "spurgeon": 0,
-            "news":     1,
-            "weather":  2,
-            "sermons":  3,
-            "calendar": 4,
-            "bible":    5,
-            "prayer":   6,
-            "notes":    7,
+        # Store page widgets by key for ordering and visibility
+        self._tab_widgets = {
+            "spurgeon": self.notebook.get_nth_page(0),
+            "news":     self.notebook.get_nth_page(1),
+            "weather":  self.notebook.get_nth_page(2),
+            "sermons":  self.notebook.get_nth_page(3),
+            "calendar": self.notebook.get_nth_page(4),
+            "bible":    self.notebook.get_nth_page(5),
+            "prayer":   self.notebook.get_nth_page(6),
+            "notes":    self.notebook.get_nth_page(7),
         }
+        self._apply_tab_order()
         self._apply_tab_visibility()
 
-    # ── Tab visibility ────────────────────────────────────────────────────────
+    # ── Tab ordering and visibility ───────────────────────────────────────────
+
+    def _apply_tab_order(self):
+        order = self.tab_order if self.tab_order else ALL_TABS[:]
+        for position, key in enumerate(order):
+            widget = self._tab_widgets.get(key)
+            if widget:
+                self.notebook.reorder_child(widget, position)
 
     def _apply_tab_visibility(self):
-        """Show/hide notebook pages based on self.visible_tabs."""
-        # Must keep at least one tab visible
         visible = self.visible_tabs if self.visible_tabs else ALL_TABS[:]
-        for key, idx in self._tab_pages.items():
-            page = self.notebook.get_nth_page(idx)
-            if page:
-                page.set_visible(key in visible)
+        for key, widget in self._tab_widgets.items():
+            if widget:
+                widget.set_visible(key in visible)
 
     # ── CSS ───────────────────────────────────────────────────────────────────
 
@@ -892,8 +898,8 @@ class MorningDashboard(Gtk.ApplicationWindow):
         auto_btn.connect("clicked", on_auto)
         box.append(auto_btn)
 
-        # ── Tabs to show ──────────────────────────────────────────────────────
-        tabs_header = Gtk.Label(label="TABS TO SHOW")
+        # ── Tabs to show / order ──────────────────────────────────────────────
+        tabs_header = Gtk.Label(label="TABS — ORDER & VISIBILITY")
         tabs_header.add_css_class("source-label")
         tabs_header.set_halign(Gtk.Align.START)
         box.append(tabs_header)
@@ -908,12 +914,67 @@ class MorningDashboard(Gtk.ApplicationWindow):
             "prayer":   "🙏 Prayer",
             "notes":    "📝 Notes",
         }
-        tab_checks = {}
-        for key, label in TAB_LABELS.items():
-            check = Gtk.CheckButton(label=label)
-            check.set_active(key in self.visible_tabs)
-            tab_checks[key] = check
-            box.append(check)
+
+        # Ensure tab_order contains all keys (handle new tabs added after pref was saved)
+        saved_order = self.tab_order[:]
+        for k in ALL_TABS:
+            if k not in saved_order:
+                saved_order.append(k)
+        tab_order_state = saved_order
+        tab_visible_state = set(self.visible_tabs)
+
+        tab_checks = {}  # key -> CheckButton (for save logic)
+        rows_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box.append(rows_box)
+
+        def rebuild_tab_rows():
+            child = rows_box.get_first_child()
+            while child:
+                nxt = child.get_next_sibling()
+                rows_box.remove(child)
+                child = nxt
+            tab_checks.clear()
+            n = len(tab_order_state)
+            for i, key in enumerate(tab_order_state):
+                label = TAB_LABELS.get(key, key)
+                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+
+                up_btn = Gtk.Button(label="↑")
+                up_btn.set_sensitive(i > 0)
+                up_btn.set_size_request(28, -1)
+                def on_up(b, k=key):
+                    idx = tab_order_state.index(k)
+                    if idx > 0:
+                        tab_order_state[idx], tab_order_state[idx - 1] = tab_order_state[idx - 1], tab_order_state[idx]
+                        rebuild_tab_rows()
+                up_btn.connect("clicked", on_up)
+
+                down_btn = Gtk.Button(label="↓")
+                down_btn.set_sensitive(i < n - 1)
+                down_btn.set_size_request(28, -1)
+                def on_down(b, k=key):
+                    idx = tab_order_state.index(k)
+                    if idx < len(tab_order_state) - 1:
+                        tab_order_state[idx], tab_order_state[idx + 1] = tab_order_state[idx + 1], tab_order_state[idx]
+                        rebuild_tab_rows()
+                down_btn.connect("clicked", on_down)
+
+                check = Gtk.CheckButton(label=label)
+                check.set_active(key in tab_visible_state)
+                def on_toggle(cb, k=key):
+                    if cb.get_active():
+                        tab_visible_state.add(k)
+                    else:
+                        tab_visible_state.discard(k)
+                check.connect("toggled", on_toggle)
+                tab_checks[key] = check
+
+                row.append(up_btn)
+                row.append(down_btn)
+                row.append(check)
+                rows_box.append(row)
+
+        rebuild_tab_rows()
 
         tabs_note = Gtk.Label(label="(At least one tab must remain visible)")
         tabs_note.add_css_class("date-label")
@@ -972,7 +1033,8 @@ class MorningDashboard(Gtk.ApplicationWindow):
             selected_location.get("lat"),
             selected_location.get("lon"),
             [cal_id for cal_id, check in cal_checks.items() if check.get_active()],
-            [key for key, check in tab_checks.items() if check.get_active()] or ALL_TABS[:],
+            list(tab_visible_state) or ALL_TABS[:],
+            tab_order_state[:],
             dialog
         ))
         btn_row.append(cancel_btn)
@@ -983,7 +1045,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         dialog.set_child(outer)
         dialog.present()
 
-    def _save_prefs(self, font_size, theme, weather_location, weather_lat, weather_lon, enabled_calendars, visible_tabs, dialog):
+    def _save_prefs(self, font_size, theme, weather_location, weather_lat, weather_lon, enabled_calendars, visible_tabs, tab_order, dialog):
         self.font_size = font_size
         self.theme = theme
         self.weather_location = weather_location
@@ -991,6 +1053,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self.weather_lon = weather_lon
         self.enabled_calendars = enabled_calendars
         self.visible_tabs = visible_tabs
+        self.tab_order = tab_order
         self.prefs.update({
             "font_size": font_size,
             "theme": theme,
@@ -999,9 +1062,11 @@ class MorningDashboard(Gtk.ApplicationWindow):
             "weather_lon": weather_lon,
             "enabled_calendars": enabled_calendars,
             "visible_tabs": visible_tabs,
+            "tab_order": tab_order,
         })
         save_prefs(self.prefs)
         self._apply_css()
+        self._apply_tab_order()
         self._apply_tab_visibility()
         # Force GTK to re-render all widgets with new styles
         self.queue_draw()
