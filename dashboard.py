@@ -7,6 +7,7 @@ import datetime
 import threading
 import json
 import os
+import zipfile
 
 # ── Google Drive helper ───────────────────────────────────────────────────────
 
@@ -336,7 +337,8 @@ def fetch_news(url):
 
 # ── Preferences helpers ───────────────────────────────────────────────────────
 
-PREFS_FILE = os.path.expanduser("~/.config/morning-dashboard/prefs.json")
+PREFS_FILE     = os.path.expanduser("~/.config/morning-dashboard/prefs.json")
+AUTOSTART_FILE = os.path.expanduser("~/.config/autostart/morning-dashboard.desktop")
 
 ALL_TABS = ["spurgeon", "news", "weather", "sermons", "calendar", "bible", "prayer", "notes"]
 
@@ -362,6 +364,10 @@ class MorningDashboard(Gtk.ApplicationWindow):
         super().__init__(application=app, title="☀️  Morning Dashboard")
         self.set_resizable(True)
         self.set_size_request(600, 400)
+
+        settings = Gtk.Settings.get_default()
+        settings.props.gtk_cursor_blink = True
+        settings.props.gtk_cursor_blink_timeout = 0  # never stop blinking
 
         self.prefs = load_prefs()
         self.font_size = self.prefs.get("font_size", 13)
@@ -551,6 +557,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         """Switch stack to key and update sidebar active state."""
         self.stack.set_visible_child_name(key)
         self._active_tab = key
+
         for k, (icon_row, icon_btn, label_btn) in self._sidebar_buttons.items():
             indicator = self._sidebar_indicators.get(k)
             active = (k == key)
@@ -612,6 +619,18 @@ class MorningDashboard(Gtk.ApplicationWindow):
     def _apply_css(self):
         fs = self.font_size
         dark = self.theme == "dark"
+
+        Gtk.Settings.get_default().props.gtk_application_prefer_dark_theme = dark
+        try:
+            gi.require_version('Adw', '1')
+            from gi.repository import Adw
+            mgr = Adw.StyleManager.get_default()
+            if dark:
+                mgr.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+            else:
+                mgr.set_color_scheme(Adw.ColorScheme.FORCE_LIGHT)
+        except Exception:
+            pass
 
         # Remove old provider and add fresh one to force full restyle
         try:
@@ -779,16 +798,18 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 background-color: {weather_bg};
                 border-radius: 12px; padding: 20px; margin: 10px;
             }}
+            .weather-icon {{ font-size: 72px; }}
             .weather-temp {{ font-size: 48px; font-weight: bold; color: {text}; }}
             .weather-desc {{ font-size: 14px; color: {subtext}; }}
-            .forecast-row {{
+            .forecast-card {{
                 background-color: {weather_bg};
-                border-radius: 8px;
-                padding: 8px 16px;
+                border-radius: 12px;
+                padding: 12px 8px;
             }}
-            .forecast-day {{ font-size: {fs}px; color: {text}; font-weight: bold; }}
-            .forecast-hi  {{ font-size: {fs}px; color: #e94560; }}
-            .forecast-lo  {{ font-size: {fs}px; color: {subtext}; }}
+            .forecast-day  {{ font-size: {fs - 1}px; color: {subtext}; font-weight: bold; }}
+            .forecast-icon {{ font-size: 28px; }}
+            .forecast-hi   {{ font-size: {fs}px; color: #e94560; font-weight: bold; }}
+            .forecast-lo   {{ font-size: {fs - 1}px; color: {subtext}; }}
             .sermon-toolbar {{
                 background-color: {header_bg};
                 padding: 8px 12px;
@@ -840,6 +861,11 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 color: {text};
                 background-color: {bg};
             }}
+            textview text cursor {{
+                color: {text} !important;
+                background-color: {text} !important;
+                border-color: {text} !important;
+            }}
             .cal-event-time {{
                 font-size: {fs - 1}px;
                 color: {subtext};
@@ -867,8 +893,22 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 background-color: {bg};
             }}
             .bible-verse text {{
-                color: {reading};
-                background-color: {bg};
+                color: {reading} !important;
+                background-color: {bg} !important;
+                caret-color: {reading} !important;
+            }}
+            .bible-verse text cursor {{
+                color: {reading} !important;
+                background-color: {reading} !important;
+                border-color: {reading} !important;
+            }}
+            .spurgeon-notes {{
+                background-color: #2d1b0e;
+                color: #d4a96a;
+            }}
+            .spurgeon-notes text {{
+                background-color: #2d1b0e;
+                color: #d4a96a;
             }}
             .prayer-item {{
                 background-color: {tab_active};
@@ -1116,6 +1156,17 @@ class MorningDashboard(Gtk.ApplicationWindow):
         theme_row.append(dark_radio)
         theme_row.append(light_radio)
         box.append(theme_row)
+
+        # Start with OS row
+        startup_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        startup_lbl = Gtk.Label(label="Start with OS:")
+        startup_lbl.set_hexpand(True)
+        startup_lbl.set_halign(Gtk.Align.START)
+        startup_check = Gtk.CheckButton(label="Launch at login")
+        startup_check.set_active(os.path.exists(AUTOSTART_FILE))
+        startup_row.append(startup_lbl)
+        startup_row.append(startup_check)
+        box.append(startup_row)
 
         # Weather location search
         loc_header = Gtk.Label(label="WEATHER LOCATION")
@@ -1368,12 +1419,53 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 list(tab_visible_state) or ALL_TABS[:],
                 tab_order_state[:],
             )
+            if startup_check.get_active():
+                os.makedirs(os.path.dirname(AUTOSTART_FILE), exist_ok=True)
+                script = os.path.abspath(__file__)
+                with open(AUTOSTART_FILE, "w") as f:
+                    f.write(f"""[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Morning Dashboard
+Comment=Your daily briefing — devotional, news and weather
+Exec=python3 {script}
+Icon={os.path.join(os.path.dirname(script), 'icon.png')}
+Terminal=false
+Categories=Utility;
+X-GNOME-Autostart-enabled=true
+""")
+            else:
+                if os.path.exists(AUTOSTART_FILE):
+                    os.remove(AUTOSTART_FILE)
 
         def on_close_request(d):
             do_save()
             return False
 
         dialog.connect("close-request", on_close_request)
+
+        # ── Export / Import ───────────────────────────────────────────────────
+        data_header = Gtk.Label(label="PERSONAL DATA")
+        data_header.add_css_class("source-label")
+        data_header.set_halign(Gtk.Align.START)
+        box.append(data_header)
+
+        self._backup_status = Gtk.Label(label="")
+        self._backup_status.add_css_class("date-label")
+        self._backup_status.set_halign(Gtk.Align.START)
+        self._backup_status.set_wrap(True)
+
+        data_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        export_btn = Gtk.Button(label="⬆ Export backup")
+        export_btn.add_css_class("sermon-btn")
+        export_btn.connect("clicked", self._export_data)
+        import_btn = Gtk.Button(label="⬇ Import backup")
+        import_btn.add_css_class("sermon-btn")
+        import_btn.connect("clicked", self._import_data)
+        data_row.append(export_btn)
+        data_row.append(import_btn)
+        box.append(data_row)
+        box.append(self._backup_status)
 
         # Buttons
         btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -1428,6 +1520,94 @@ class MorningDashboard(Gtk.ApplicationWindow):
             child.queue_draw()
         threading.Thread(target=self._load_weather, daemon=True).start()
         threading.Thread(target=self._load_calendar, daemon=True).start()
+
+    # ── Export / Import ───────────────────────────────────────────────────────
+
+    _BACKUP_FILES = [
+        (os.path.expanduser("~/.config/morning-dashboard/prefs.json"),          "prefs.json"),
+        (os.path.expanduser("~/.config/morning-dashboard/spurgeon_notes.json"), "spurgeon_notes.json"),
+        (os.path.expanduser("~/.config/morning-dashboard/notes.txt"),           "notes.txt"),
+        (os.path.expanduser("~/morning-dashboard/prayers.json"),                "prayers.json"),
+    ]
+
+    def _export_data(self, btn):
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Export personal data backup")
+        today = datetime.date.today().strftime("%Y-%m-%d")
+        dialog.set_initial_name(f"morning-dashboard-{today}.zip")
+        f = Gtk.FileFilter()
+        f.set_name("ZIP archive")
+        f.add_pattern("*.zip")
+        fl = Gio.ListStore.new(Gtk.FileFilter)
+        fl.append(f)
+        dialog.set_filters(fl)
+        dialog.save(self, None, self._export_data_finish)
+
+    def _export_data_finish(self, dialog, result):
+        try:
+            file = dialog.save_finish(result)
+        except Exception:
+            return
+        if not file:
+            return
+        path = file.get_path()
+        try:
+            sermons_dir = os.path.expanduser("~/morning-dashboard/sermons")
+            with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for src, arcname in self._BACKUP_FILES:
+                    if os.path.exists(src):
+                        zf.write(src, arcname)
+                if os.path.isdir(sermons_dir):
+                    for fname in os.listdir(sermons_dir):
+                        if fname.endswith(".txt"):
+                            zf.write(os.path.join(sermons_dir, fname), f"sermons/{fname}")
+            if hasattr(self, "_backup_status"):
+                self._backup_status.set_text(f"✅ Exported to {os.path.basename(path)}")
+        except Exception as e:
+            if hasattr(self, "_backup_status"):
+                self._backup_status.set_text(f"❌ Export failed: {e}")
+
+    def _import_data(self, btn):
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Import personal data backup")
+        f = Gtk.FileFilter()
+        f.set_name("ZIP archive")
+        f.add_pattern("*.zip")
+        fl = Gio.ListStore.new(Gtk.FileFilter)
+        fl.append(f)
+        dialog.set_filters(fl)
+        dialog.open(self, None, self._import_data_finish)
+
+    def _import_data_finish(self, dialog, result):
+        try:
+            file = dialog.open_finish(result)
+        except Exception:
+            return
+        if not file:
+            return
+        path = file.get_path()
+        dest_map = {arcname: src for src, arcname in self._BACKUP_FILES}
+        sermons_dir = os.path.expanduser("~/morning-dashboard/sermons")
+        try:
+            with zipfile.ZipFile(path, "r") as zf:
+                for name in zf.namelist():
+                    if name in dest_map:
+                        dest = dest_map[name]
+                        os.makedirs(os.path.dirname(dest), exist_ok=True)
+                        with zf.open(name) as src, open(dest, "wb") as dst:
+                            dst.write(src.read())
+                    elif name.startswith("sermons/") and name.endswith(".txt"):
+                        os.makedirs(sermons_dir, exist_ok=True)
+                        fname = os.path.basename(name)
+                        with zf.open(name) as src, open(os.path.join(sermons_dir, fname), "wb") as dst:
+                            dst.write(src.read())
+            self._refresh_sermon_list()
+            self._spurgeon_notes_load()
+            if hasattr(self, "_backup_status"):
+                self._backup_status.set_text("✅ Imported — restart the app to apply all changes")
+        except Exception as e:
+            if hasattr(self, "_backup_status"):
+                self._backup_status.set_text(f"❌ Import failed: {e}")
 
     # ── Spurgeon Tab ──────────────────────────────────────────────────────────
 
@@ -1540,6 +1720,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self.spurgeon_notes_view = Gtk.TextView()
         self.spurgeon_notes_view.set_wrap_mode(Gtk.WrapMode.WORD)
         self.spurgeon_notes_view.add_css_class("bible-verse")
+        self.spurgeon_notes_view.add_css_class("spurgeon-notes")
         self.spurgeon_notes_view.set_left_margin(8)
         self.spurgeon_notes_view.set_right_margin(8)
         self.spurgeon_notes_view.set_top_margin(8)
@@ -1547,6 +1728,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self.spurgeon_notes_view.get_buffer().connect(
             "changed", self._spurgeon_notes_on_change
         )
+        self.spurgeon_notes_view.connect("map", lambda w: w.grab_focus())
 
         notes_scroll.set_child(self.spurgeon_notes_view)
         right_box.append(notes_scroll)
@@ -1881,6 +2063,10 @@ class MorningDashboard(Gtk.ApplicationWindow):
         current_box.set_spacing(6)
         current_box.set_halign(Gtk.Align.CENTER)
 
+        self.weather_icon_lbl = Gtk.Label(label="🌡️")
+        self.weather_icon_lbl.add_css_class("weather-icon")
+        current_box.append(self.weather_icon_lbl)
+
         self.weather_temp = Gtk.Label(label="--°C")
         self.weather_temp.add_css_class("weather-temp")
         current_box.append(self.weather_temp)
@@ -1898,8 +2084,9 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self.weather_outer.append(forecast_title)
 
         # Forecast grid — will be populated after data loads
-        self.forecast_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.forecast_box.set_spacing(4)
+        self.forecast_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        self.forecast_box.set_spacing(8)
+        self.forecast_box.set_homogeneous(True)
         self.weather_outer.append(self.forecast_box)
 
         note = Gtk.Label(label="Weather powered by Open-Meteo (no API key needed)")
@@ -1927,7 +2114,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 ).json()
                 results = geo.get("results", [])
                 if not results:
-                    GLib.idle_add(self._set_weather, "--°C",
+                    GLib.idle_add(self._set_weather, "--°C", "🌡️",
                                   f"Location not found: {location}", [])
                     return
                 best = results[0]
@@ -1952,13 +2139,13 @@ class MorningDashboard(Gtk.ApplicationWindow):
 
             temp = w["current_weather"]["temperature"]
             code = w["current_weather"]["weathercode"]
-            desc = self._weather_code(code)
-            current_str = f"{desc}  —  {city}"
+            icon = self._weather_icon(code)
+            current_str = f"{self._weather_desc(code)}  —  {city}"
 
             # Build 7-day list
             daily = w.get("daily", {})
-            dates   = daily.get("time", [])
-            codes   = daily.get("weathercode", [])
+            dates    = daily.get("time", [])
+            codes    = daily.get("weathercode", [])
             maxtemps = daily.get("temperature_2m_max", [])
             mintemps = daily.get("temperature_2m_min", [])
 
@@ -1966,17 +2153,18 @@ class MorningDashboard(Gtk.ApplicationWindow):
             for i in range(min(7, len(dates))):
                 date_obj = datetime.date.fromisoformat(dates[i])
                 day_name = date_obj.strftime("%A")
-                icon     = self._weather_code(codes[i]).split()[0] if codes else "?"
+                fi       = self._weather_icon(codes[i]) if codes else "?"
                 hi       = f"{maxtemps[i]:.0f}°" if maxtemps else "--"
                 lo       = f"{mintemps[i]:.0f}°" if mintemps else "--"
-                forecast.append((day_name, icon, hi, lo))
+                forecast.append((day_name, fi, hi, lo))
 
-            GLib.idle_add(self._set_weather, f"{temp}°C", current_str, forecast)
+            GLib.idle_add(self._set_weather, f"{temp}°C", icon, current_str, forecast)
         except Exception as e:
-            GLib.idle_add(self._set_weather, "--°C",
+            GLib.idle_add(self._set_weather, "--°C", "🌡️",
                           f"Could not load weather: {e}", [])
 
-    def _set_weather(self, temp, desc, forecast):
+    def _set_weather(self, temp, icon, desc, forecast):
+        self.weather_icon_lbl.set_text(icon)
         self.weather_temp.set_text(temp)
         self.weather_desc.set_text(desc)
 
@@ -1987,43 +2175,59 @@ class MorningDashboard(Gtk.ApplicationWindow):
             self.forecast_box.remove(child)
             child = nxt
 
-        # Add new forecast rows
+        # Add new forecast cards
         for day_name, icon, hi, lo in forecast:
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-            row.add_css_class("forecast-row")
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            card.add_css_class("forecast-card")
+            card.set_hexpand(True)
 
-            day_lbl = Gtk.Label(label=day_name)
+            day_lbl = Gtk.Label(label=day_name[:3])  # Mon, Tue, etc.
             day_lbl.add_css_class("forecast-day")
-            day_lbl.set_width_chars(12)
-            day_lbl.set_halign(Gtk.Align.START)
+            day_lbl.set_halign(Gtk.Align.CENTER)
 
             icon_lbl = Gtk.Label(label=icon)
-            icon_lbl.set_width_chars(4)
+            icon_lbl.add_css_class("forecast-icon")
+            icon_lbl.set_halign(Gtk.Align.CENTER)
 
-            hi_lbl = Gtk.Label(label=f"↑ {hi}")
+            hi_lbl = Gtk.Label(label=hi)
             hi_lbl.add_css_class("forecast-hi")
-            hi_lbl.set_width_chars(7)
+            hi_lbl.set_halign(Gtk.Align.CENTER)
 
-            lo_lbl = Gtk.Label(label=f"↓ {lo}")
+            lo_lbl = Gtk.Label(label=lo)
             lo_lbl.add_css_class("forecast-lo")
+            lo_lbl.set_halign(Gtk.Align.CENTER)
 
-            row.append(day_lbl)
-            row.append(icon_lbl)
-            row.append(hi_lbl)
-            row.append(lo_lbl)
-            self.forecast_box.append(row)
+            card.append(day_lbl)
+            card.append(icon_lbl)
+            card.append(hi_lbl)
+            card.append(lo_lbl)
+            self.forecast_box.append(card)
 
-    def _weather_code(self, code):
-        codes = {
-            0: "Clear sky ☀️", 1: "Mainly clear 🌤️", 2: "Partly cloudy ⛅",
-            3: "Overcast ☁️", 45: "Foggy 🌫️", 48: "Icy fog 🌫️",
-            51: "Light drizzle 🌦️", 53: "Drizzle 🌦️", 55: "Heavy drizzle 🌧️",
-            61: "Light rain 🌧️", 63: "Rain 🌧️", 65: "Heavy rain 🌧️",
-            71: "Light snow ❄️", 73: "Snow ❄️", 75: "Heavy snow ❄️",
-            80: "Showers 🌦️", 81: "Showers 🌦️", 82: "Heavy showers 🌧️",
-            95: "Thunderstorm ⛈️", 96: "Thunderstorm ⛈️", 99: "Thunderstorm ⛈️",
+    def _weather_icon(self, code):
+        icons = {
+            0: "☀️",  1: "🌤️",  2: "⛅",   3: "☁️",
+            45: "🌫️", 48: "🌫️",
+            51: "🌦️", 53: "🌦️", 55: "🌧️",
+            61: "🌧️", 63: "🌧️", 65: "🌧️",
+            71: "❄️",  73: "❄️",  75: "❄️",  77: "🌨️",
+            80: "🌦️", 81: "🌦️", 82: "🌧️",
+            85: "🌨️", 86: "🌨️",
+            95: "⛈️", 96: "⛈️", 99: "⛈️",
         }
-        return codes.get(code, f"Weather code {code}")
+        return icons.get(code, "🌡️")
+
+    def _weather_desc(self, code):
+        descs = {
+            0: "Clear sky",       1: "Mainly clear",    2: "Partly cloudy",
+            3: "Overcast",        45: "Foggy",           48: "Icy fog",
+            51: "Light drizzle",  53: "Drizzle",         55: "Heavy drizzle",
+            61: "Light rain",     63: "Rain",            65: "Heavy rain",
+            71: "Light snow",     73: "Snow",            75: "Heavy snow",
+            77: "Snow grains",    80: "Showers",         81: "Showers",
+            82: "Heavy showers",  85: "Snow showers",    86: "Heavy snow showers",
+            95: "Thunderstorm",   96: "Thunderstorm",    99: "Thunderstorm",
+        }
+        return descs.get(code, f"Code {code}")
 
 
     # ── Sermon Notes Tab ──────────────────────────────────────────────────────
@@ -2559,6 +2763,19 @@ class MorningDashboard(Gtk.ApplicationWindow):
         row.append(lbl)
 
         if not indented:
+            if not prayer.get("done"):
+                undone = [p for p in self.prayers if not p.get("done")]
+                idx = undone.index(prayer)
+                up_btn = Gtk.Button(label="▲")
+                up_btn.add_css_class("sermon-btn")
+                up_btn.set_sensitive(idx > 0)
+                up_btn.connect("clicked", lambda b, p=prayer: self._prayer_move(p, -1))
+                dn_btn = Gtk.Button(label="▼")
+                dn_btn.add_css_class("sermon-btn")
+                dn_btn.set_sensitive(idx < len(undone) - 1)
+                dn_btn.connect("clicked", lambda b, p=prayer: self._prayer_move(p, 1))
+                row.append(up_btn)
+                row.append(dn_btn)
             sub_btn = Gtk.Button(label="+ sub")
             sub_btn.add_css_class("sermon-btn")
             sub_btn.connect("clicked", lambda b, p=prayer: self._prayer_start_add_child(p))
@@ -2641,6 +2858,17 @@ class MorningDashboard(Gtk.ApplicationWindow):
             parent["children"] = [c for c in parent.get("children", []) if c is not prayer]
         self._prayer_save()
         self._prayer_render()
+
+    def _prayer_move(self, prayer, direction):
+        undone = [p for p in self.prayers if not p.get("done")]
+        done   = [p for p in self.prayers if p.get("done")]
+        idx = undone.index(prayer)
+        new_idx = idx + direction
+        if 0 <= new_idx < len(undone):
+            undone[idx], undone[new_idx] = undone[new_idx], undone[idx]
+            self.prayers = undone + done
+            self._prayer_save()
+            self._prayer_render()
 
     def _prayer_clear_done(self, btn):
         for p in self.prayers:
