@@ -8,14 +8,16 @@ A personal daily briefing app for the Linux desktop, built with Python and GTK4.
 
 ## Features
 
-- 📖 Spurgeon Morning & Evening devotional
+- 📖 Spurgeon Morning & Evening devotional with date-keyed notes
 - 📰 News — BBC, AI & Tech headlines
 - 🌤️ Weather — current conditions and 7-day forecast
 - 📜 Bible reader — 10 translations, all 66 books
 - ✍️ Sermon notes with Google Drive sync
 - 📅 Google Calendar — 7-day view across all calendars
-- 🙏 Prayer list with checkboxes
-- ⚙️ Preferences — dark/light theme, font size, location search
+- 🙏 Prayer list with checkboxes and reordering
+- 📝 Notes — freeform, auto-saving
+- Collapsible sidebar navigation with per-tab accent colours
+- ⚙️ Preferences — dark/light theme, font size, location search, tab visibility/ordering, data export/import, autostart
 
 ## Requirements
 

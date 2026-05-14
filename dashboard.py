@@ -206,6 +206,38 @@ BIBLE_TRANSLATIONS = [
     ("Douay-Rheims 1899", "dra"),
 ]
 
+# Four sequential reading streams for the M'Cheyne daily Bible reading plan.
+# Jan 1 starts at: Gen 1 | Ezra 1 | Matt 1 | Acts 1.
+MCHEYNE_STREAMS = [
+    ["GEN","EXO","LEV","NUM","DEU","JOS","JDG","RUT","1SA","2SA","1KI","2KI",
+     "1CH","2CH","EZR","NEH","EST","JOB","PSA","PRO","ECC","SNG","ISA","JER",
+     "LAM","EZK","DAN","HOS","JOL","AMO","OBA","JON","MIC","NAH","HAB","ZEP","HAG","ZEC","MAL"],
+    ["EZR","NEH","EST","JOB","PSA","PRO","ECC","SNG","ISA","JER","LAM","EZK",
+     "DAN","HOS","JOL","AMO","OBA","JON","MIC","NAH","HAB","ZEP","HAG","ZEC","MAL"],
+    ["MAT","MRK","LUK","JHN","ACT","ROM","1CO","2CO","GAL","EPH","PHP","COL",
+     "1TH","2TH","1TI","2TI","TIT","PHM","HEB","JAS","1PE","2PE","1JN","2JN","3JN","JUD","REV"],
+    ["ACT","ROM","1CO","2CO","GAL","EPH","PHP","COL","1TH","2TH","1TI","2TI",
+     "TIT","PHM","HEB","JAS","1PE","2PE","1JN","2JN","3JN","JUD","REV","MAT","MRK","LUK","JHN"],
+]
+_BOOK_ID_TO_INFO = {b[1]: (i, b[2]) for i, b in enumerate(BIBLE_BOOKS)}
+
+def mcheyne_readings_for_date(date=None):
+    """Return today's 4 M'Cheyne readings as list of (book_idx, chapter, book_name)."""
+    if date is None:
+        date = datetime.date.today()
+    day = date.timetuple().tm_yday
+    results = []
+    for stream in MCHEYNE_STREAMS:
+        total = sum(_BOOK_ID_TO_INFO[bk][1] for bk in stream)
+        pos = (day - 1) % total
+        for book_id in stream:
+            book_idx, chapters = _BOOK_ID_TO_INFO[book_id]
+            if pos < chapters:
+                results.append((book_idx, pos + 1, BIBLE_BOOKS[book_idx][0]))
+                break
+            pos -= chapters
+    return results
+
 def fetch_esv_chapter(book_id, chapter, translation="web"):
     """Fetch a chapter from bible-api.com in paragraph format."""
     try:
@@ -384,7 +416,10 @@ class MorningDashboard(Gtk.ApplicationWindow):
         win_h = self.prefs.get("window_height", 650)
         self.set_default_size(win_w, win_h)
 
-        # Save size on close
+        # Track size changes so close-request always has current values cached
+        self._size_save_timer = None
+        self.connect("notify::width", self._on_window_resize)
+        self.connect("notify::height", self._on_window_resize)
         self.connect("close-request", self._on_close_request)
 
         # Dynamic CSS provider (rebuilt when settings change)
@@ -606,11 +641,24 @@ class MorningDashboard(Gtk.ApplicationWindow):
                     self._switch_tab(key)
                     break
 
-    def _on_close_request(self, *args):
-        """Save window size before closing."""
+    def _on_window_resize(self, *args):
         w, h = self.get_width(), self.get_height()
-        self.prefs["window_width"] = w
-        self.prefs["window_height"] = h
+        if w > 0 and h > 0:
+            self.prefs["window_width"] = w
+            self.prefs["window_height"] = h
+        if self._size_save_timer:
+            GLib.source_remove(self._size_save_timer)
+        self._size_save_timer = GLib.timeout_add(500, self._flush_size_to_disk)
+
+    def _flush_size_to_disk(self):
+        self._size_save_timer = None
+        save_prefs(self.prefs)
+        return False
+
+    def _on_close_request(self, *args):
+        if self._size_save_timer:
+            GLib.source_remove(self._size_save_timer)
+            self._size_save_timer = None
         save_prefs(self.prefs)
         return False  # allow close to proceed
 
@@ -2555,6 +2603,11 @@ X-GNOME-Autostart-enabled=true
         next_btn.connect("clicked", self._bible_next)
         toolbar.append(next_btn)
 
+        mcheyne_btn = Gtk.MenuButton(label="M'Cheyne")
+        mcheyne_btn.add_css_class("sermon-btn")
+        mcheyne_btn.set_popover(self._build_mcheyne_popover())
+        toolbar.append(mcheyne_btn)
+
         self.bible_ref_label = Gtk.Label(label="")
         self.bible_ref_label.add_css_class("section-title")
         self.bible_ref_label.set_halign(Gtk.Align.END)
@@ -2622,6 +2675,35 @@ X-GNOME-Autostart-enabled=true
 
     def _set_bible_text(self, text):
         self.bible_buffer.set_text(text)
+
+    def _build_mcheyne_popover(self):
+        today = datetime.date.today()
+        readings = mcheyne_readings_for_date(today)
+        popover = Gtk.Popover()
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        box.set_margin_top(10)
+        box.set_margin_bottom(10)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        title = Gtk.Label(label=f"M'Cheyne — {today.strftime('%B %-d')}")
+        title.add_css_class("section-title")
+        title.set_halign(Gtk.Align.START)
+        box.append(title)
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep.set_margin_top(4)
+        sep.set_margin_bottom(4)
+        box.append(sep)
+        for book_idx, chapter, book_name in readings:
+            btn = Gtk.Button(label=f"{book_name} {chapter}")
+            btn.add_css_class("sermon-btn")
+            btn.connect("clicked", self._on_mcheyne_reading_clicked, popover, book_idx, chapter)
+            box.append(btn)
+        popover.set_child(box)
+        return popover
+
+    def _on_mcheyne_reading_clicked(self, _btn, popover, book_idx, chapter):
+        popover.popdown()
+        self._open_bible_ref(book_idx, chapter)
 
     def _bible_prev(self, btn):
         ch  = self._bible_chapter
