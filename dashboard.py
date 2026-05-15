@@ -19,7 +19,7 @@ SCOPES = [
 ]
 CREDENTIALS    = os.path.expanduser("~/morning-dashboard/credentials.json")
 TOKEN_FILE     = os.path.expanduser("~/morning-dashboard/token.json")
-DRIVE_FOLDER   = "Morning Dashboard — Sermons"
+DRIVE_FOLDER = "Morning Dashboard Backup"
 
 def get_drive_service():
     from google.oauth2.credentials import Credentials
@@ -87,6 +87,40 @@ def sync_sermons_to_drive(sermons_dir, status_cb):
         status_cb(f"✅ Synced {len(files)} sermon(s) to Google Drive!")
     except Exception as e:
         status_cb(f"❌ Sync failed: {e}")
+
+_DATA_FILES = [
+    (os.path.expanduser("~/.config/morning-dashboard/spurgeon_notes.json"), "spurgeon_notes.json", "application/json"),
+    (os.path.expanduser("~/.config/morning-dashboard/notes.txt"),           "notes.txt",           "text/plain"),
+    (os.path.expanduser("~/morning-dashboard/prayers.json"),                "prayers.json",        "application/json"),
+]
+
+def sync_data_to_drive(status_cb=None):
+    """Upload data files to Drive. No-op if not authenticated."""
+    def cb(msg):
+        if status_cb:
+            status_cb(msg)
+    if not os.path.exists(TOKEN_FILE):
+        cb("❌ Not authenticated — open Google Calendar or Sermon Notes first.")
+        return
+    try:
+        from googleapiclient.http import MediaFileUpload
+        service   = get_drive_service()
+        folder_id = get_or_create_folder(service, DRIVE_FOLDER)
+        q         = f"'{folder_id}' in parents and trashed=false"
+        existing  = service.files().list(q=q, fields="files(id,name)").execute()
+        existing_map = {f["name"]: f["id"] for f in existing.get("files", [])}
+        for local_path, fname, mime in _DATA_FILES:
+            if not os.path.exists(local_path):
+                continue
+            cb(f"Uploading {fname}…")
+            media = MediaFileUpload(local_path, mimetype=mime)
+            if fname in existing_map:
+                service.files().update(fileId=existing_map[fname], media_body=media).execute()
+            else:
+                meta = {"name": fname, "parents": [folder_id]}
+                service.files().create(body=meta, media_body=media, fields="id").execute()
+    except Exception as e:
+        cb(f"❌ Backup failed: {e}")
 
 # ── Calendar helper ───────────────────────────────────────────────────────────
 
@@ -1511,8 +1545,12 @@ X-GNOME-Autostart-enabled=true
         import_btn = Gtk.Button(label="⬇ Import backup")
         import_btn.add_css_class("sermon-btn")
         import_btn.connect("clicked", self._import_data)
+        drive_btn = Gtk.Button(label="☁ Backup to Drive")
+        drive_btn.add_css_class("sermon-btn")
+        drive_btn.connect("clicked", self._backup_to_drive)
         data_row.append(export_btn)
         data_row.append(import_btn)
+        data_row.append(drive_btn)
         box.append(data_row)
         box.append(self._backup_status)
 
@@ -1657,6 +1695,25 @@ X-GNOME-Autostart-enabled=true
         except Exception as e:
             if hasattr(self, "_backup_status"):
                 self._backup_status.set_text(f"❌ Import failed: {e}")
+
+    def _backup_to_drive(self, btn):
+        if not os.path.exists(CREDENTIALS):
+            self._backup_status.set_text("❌ credentials.json not found in ~/morning-dashboard/")
+            return
+        self._backup_status.set_text("Starting backup…")
+        def run():
+            state = {"ok": True}
+            def cb(msg):
+                if msg.startswith("❌"):
+                    state["ok"] = False
+                GLib.idle_add(self._backup_status.set_text, msg)
+            sermons_dir = os.path.expanduser("~/morning-dashboard/sermons")
+            sync_sermons_to_drive(sermons_dir, cb)
+            if state["ok"]:
+                sync_data_to_drive(cb)
+            if state["ok"]:
+                GLib.idle_add(self._backup_status.set_text, "✅ All backed up to Drive!")
+        threading.Thread(target=run, daemon=True).start()
 
     # ── Spurgeon Tab ──────────────────────────────────────────────────────────
 
