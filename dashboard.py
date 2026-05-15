@@ -344,9 +344,10 @@ def fetch_spurgeon(date=None):
 # ── News helper ───────────────────────────────────────────────────────────────
 
 NEWS_SOURCES = {
-    "AI News":   "https://feeds.feedburner.com/TheHackersNews",
-    "Tech News": "https://feeds.bbci.co.uk/news/technology/rss.xml",
-    "BBC News":  "https://feeds.bbci.co.uk/news/rss.xml",
+    "BBC News":    "https://feeds.bbci.co.uk/news/rss.xml",
+    "Google News": "https://news.google.com/rss",
+    "AI News":     "https://feeds.feedburner.com/TheHackersNews",
+    "Tech News":   "https://feeds.bbci.co.uk/news/technology/rss.xml",
 }
 
 def fetch_news(url):
