@@ -238,7 +238,23 @@ BIBLE_TRANSLATIONS = [
     ("Open English Bible (UK)", "oeb-cw"),
     ("World English Bible (British)", "webbe"),
     ("Douay-Rheims 1899", "dra"),
+    ("CSB (API.Bible)", "apibible:CSB"),
+    ("NLT (API.Bible)", "apibible:NLT"),
+    ("NIV (API.Bible)", "apibible:NIV"),
 ]
+
+# Bible IDs on the API.Bible platform (rest.api.bible).
+_APIBIBLE_IDS = {
+    "CSB": "a556c5305ee15c3f-01",
+    "NLT": "d6e14a625393b4da-01",
+    "NIV": "3e2eb613d45e131e-01",
+}
+
+_APIBIBLE_CITATIONS = {
+    "CSB": "Christian Standard Bible® and CSB® are federally registered trademarks of Holman Bible Publishers. All rights reserved. bhpublishinggroup.com",
+    "NLT": "Holy Bible, New Living Translation, Copyright © 2014, Tyndale House Publishers. All rights reserved. tyndale.com",
+    "NIV": "The Holy Bible, New International Version® NIV® Copyright © 1973, 1978, 1984, 2011 by Biblica, Inc.® Used by Permission of Biblica, Inc.® All rights reserved worldwide.",
+}
 
 # Four sequential reading streams for the M'Cheyne daily Bible reading plan.
 # Jan 1 starts at: Gen 1 | Ezra 1 | Matt 1 | Acts 1.
@@ -297,6 +313,39 @@ def fetch_esv_chapter(book_id, chapter, translation="web"):
                 return "\n\n".join(paragraphs)
             return "No text available for this translation."
         return f"Could not load chapter (HTTP {r.status_code})"
+    except Exception as e:
+        return f"Error: {e}"
+
+def fetch_apibible_chapter(book_id, chapter, bible_name, api_key):
+    """Fetch a chapter from api.scripture.api.bible."""
+    import re
+    if not api_key:
+        return "No API.Bible key set — add one in Preferences."
+    bible_id = _APIBIBLE_IDS.get(bible_name)
+    if not bible_id:
+        return f"Unknown API.Bible translation: {bible_name}"
+    try:
+        chapter_id = f"{book_id}.{chapter}"
+        url = f"https://rest.api.bible/v1/bibles/{bible_id}/chapters/{chapter_id}"
+        r = requests.get(
+            url,
+            headers={"api-key": api_key, "User-Agent": "MorningDashboard/1.0"},
+            params={
+                "content-type": "text",
+                "include-verse-numbers": "true",
+                "include-chapter-numbers": "false",
+                "include-titles": "false",
+                "include-notes": "false",
+            },
+            timeout=10,
+        )
+        if r.status_code == 401:
+            return "Invalid API.Bible key — check your key in Preferences."
+        if r.status_code != 200:
+            return f"Could not load chapter (HTTP {r.status_code})"
+        content = r.json().get("data", {}).get("content", "")
+        paragraphs = [p.strip() for p in re.split(r"\n{2,}", content) if p.strip()]
+        return "\n\n".join(paragraphs) if paragraphs else "No text available."
     except Exception as e:
         return f"Error: {e}"
 
@@ -445,6 +494,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self.enabled_calendars = self.prefs.get("enabled_calendars", [])
         self.visible_tabs = self.prefs.get("visible_tabs", ALL_TABS[:])
         self.tab_order = self.prefs.get("tab_order", ALL_TABS[:])
+        self.api_bible_key = self.prefs.get("api_bible_key", "")
 
         # Restore window size
         win_w = self.prefs.get("window_width", 900)
@@ -1066,6 +1116,11 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 color: {accent};
                 font-weight: bold;
             }}
+            .bible-citation {{
+                font-size: {fs - 3}px;
+                color: {subtext};
+                font-style: italic;
+            }}
         """.encode()
         self.css_provider.load_from_data(css)
         Gtk.StyleContext.add_provider_for_display(
@@ -1363,6 +1418,34 @@ class MorningDashboard(Gtk.ApplicationWindow):
         auto_btn.connect("clicked", on_auto)
         box.append(auto_btn)
 
+        # ── API.Bible key ─────────────────────────────────────────────────────
+        bible_api_header = Gtk.Label(label="BIBLE (API.BIBLE)")
+        bible_api_header.add_css_class("source-label")
+        bible_api_header.set_halign(Gtk.Align.START)
+        box.append(bible_api_header)
+
+        bible_key_note = Gtk.Label(label="Free API key from api.scripture.api.bible — required for CSB, NLT and NIV.")
+        bible_key_note.add_css_class("date-label")
+        bible_key_note.set_halign(Gtk.Align.START)
+        bible_key_note.set_wrap(True)
+        box.append(bible_key_note)
+
+        bible_key_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        bible_key_lbl = Gtk.Label(label="API key:")
+        bible_key_lbl.set_halign(Gtk.Align.START)
+        bible_key_entry = Gtk.Entry()
+        bible_key_entry.set_text(self.api_bible_key)
+        bible_key_entry.set_placeholder_text("Paste your API.Bible key here…")
+        bible_key_entry.set_hexpand(True)
+        bible_key_entry.set_visibility(False)
+        bible_key_entry.set_input_purpose(Gtk.InputPurpose.PASSWORD)
+        show_key_btn = Gtk.CheckButton(label="Show")
+        show_key_btn.connect("toggled", lambda b: bible_key_entry.set_visibility(b.get_active()))
+        bible_key_row.append(bible_key_lbl)
+        bible_key_row.append(bible_key_entry)
+        bible_key_row.append(show_key_btn)
+        box.append(bible_key_row)
+
         # ── Tabs to show / order ──────────────────────────────────────────────
         tabs_header = Gtk.Label(label="TABS — ORDER & VISIBILITY")
         tabs_header.add_css_class("source-label")
@@ -1501,6 +1584,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 [cal_id for cal_id, check in cal_checks.items() if check.get_active()],
                 list(tab_visible_state) or ALL_TABS[:],
                 tab_order_state[:],
+                bible_key_entry.get_text().strip(),
             )
             if startup_check.get_active():
                 os.makedirs(os.path.dirname(AUTOSTART_FILE), exist_ok=True)
@@ -1577,7 +1661,7 @@ X-GNOME-Autostart-enabled=true
         dialog.set_child(outer)
         dialog.present()
 
-    def _save_prefs(self, font_size, theme, weather_location, weather_lat, weather_lon, enabled_calendars, visible_tabs, tab_order):
+    def _save_prefs(self, font_size, theme, weather_location, weather_lat, weather_lon, enabled_calendars, visible_tabs, tab_order, api_bible_key=""):
         self.font_size = font_size
         self.theme = theme
         self.weather_location = weather_location
@@ -1586,6 +1670,7 @@ X-GNOME-Autostart-enabled=true
         self.enabled_calendars = enabled_calendars
         self.visible_tabs = visible_tabs
         self.tab_order = tab_order
+        self.api_bible_key = api_bible_key
         self.prefs.update({
             "font_size": font_size,
             "theme": theme,
@@ -1595,6 +1680,7 @@ X-GNOME-Autostart-enabled=true
             "enabled_calendars": enabled_calendars,
             "visible_tabs": visible_tabs,
             "tab_order": tab_order,
+            "api_bible_key": api_bible_key,
         })
         save_prefs(self.prefs)
         self._apply_css()
@@ -2695,6 +2781,16 @@ X-GNOME-Autostart-enabled=true
         scroll.set_child(self.bible_view)
         outer.append(scroll)
 
+        self.bible_citation_label = Gtk.Label()
+        self.bible_citation_label.add_css_class("bible-citation")
+        self.bible_citation_label.set_wrap(True)
+        self.bible_citation_label.set_halign(Gtk.Align.START)
+        self.bible_citation_label.set_margin_start(12)
+        self.bible_citation_label.set_margin_end(12)
+        self.bible_citation_label.set_margin_bottom(6)
+        self.bible_citation_label.set_visible(False)
+        outer.append(self.bible_citation_label)
+
         self.stack.add_named(outer, "bible")
 
         # Load Genesis 1 by default
@@ -2721,6 +2817,13 @@ X-GNOME-Autostart-enabled=true
         trans_id   = BIBLE_TRANSLATIONS[trans_idx][1]
         self.bible_ref_label.set_text(f"{book_name} {chapter}  —  {trans_name}")
         self.bible_buffer.set_text("Loading…")
+        if trans_id.startswith("apibible:"):
+            bible_name = trans_id[len("apibible:"):]
+            citation = _APIBIBLE_CITATIONS.get(bible_name, "")
+            self.bible_citation_label.set_text(citation)
+            self.bible_citation_label.set_visible(bool(citation))
+        else:
+            self.bible_citation_label.set_visible(False)
         threading.Thread(
             target=self._fetch_and_set_bible,
             args=(book_id, chapter, trans_id),
@@ -2728,7 +2831,10 @@ X-GNOME-Autostart-enabled=true
         ).start()
 
     def _fetch_and_set_bible(self, book_id, chapter, trans_id):
-        text = fetch_esv_chapter(book_id, chapter, trans_id)
+        if trans_id.startswith("apibible:"):
+            text = fetch_apibible_chapter(book_id, chapter, trans_id[len("apibible:"):], self.api_bible_key)
+        else:
+            text = fetch_esv_chapter(book_id, chapter, trans_id)
         GLib.idle_add(self._set_bible_text, text)
 
     def _set_bible_text(self, text):
