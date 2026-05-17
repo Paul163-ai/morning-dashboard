@@ -501,10 +501,6 @@ class MorningDashboard(Gtk.ApplicationWindow):
         win_h = self.prefs.get("window_height", 650)
         self.set_default_size(win_w, win_h)
 
-        # Track size changes so close-request always has current values cached
-        self._size_save_timer = None
-        self.connect("notify::width", self._on_window_resize)
-        self.connect("notify::height", self._on_window_resize)
         self.connect("close-request", self._on_close_request)
 
         # Dynamic CSS provider (rebuilt when settings change)
@@ -729,26 +725,13 @@ class MorningDashboard(Gtk.ApplicationWindow):
                     self._switch_tab(key)
                     break
 
-    def _on_window_resize(self, *args):
+    def _on_close_request(self, *args):
         w, h = self.get_width(), self.get_height()
         if w > 0 and h > 0:
             self.prefs["window_width"] = w
             self.prefs["window_height"] = h
-        if self._size_save_timer:
-            GLib.source_remove(self._size_save_timer)
-        self._size_save_timer = GLib.timeout_add(500, self._flush_size_to_disk)
-
-    def _flush_size_to_disk(self):
-        self._size_save_timer = None
         save_prefs(self.prefs)
         return False
-
-    def _on_close_request(self, *args):
-        if self._size_save_timer:
-            GLib.source_remove(self._size_save_timer)
-            self._size_save_timer = None
-        save_prefs(self.prefs)
-        return False  # allow close to proceed
 
     # ── CSS ───────────────────────────────────────────────────────────────────
 
