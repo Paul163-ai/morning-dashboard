@@ -650,12 +650,13 @@ class MorningDashboard(Gtk.ApplicationWindow):
         spacer.set_vexpand(True)
         self._icon_col.append(spacer)
 
-        self._sidebar_collapsed = False
-        self._collapse_btn = Gtk.Button(label="◀")
+        self._sidebar_collapsed = self.prefs.get("sidebar_collapsed", False)
+        self._collapse_btn = Gtk.Button(label="▶" if self._sidebar_collapsed else "◀")
         self._collapse_btn.add_css_class("sidebar-collapse-btn")
-        self._collapse_btn.set_tooltip_text("Collapse sidebar")
+        self._collapse_btn.set_tooltip_text("Expand sidebar" if self._sidebar_collapsed else "Collapse sidebar")
         self._collapse_btn.connect("clicked", self._toggle_sidebar)
         self._icon_col.append(self._collapse_btn)
+        self._label_revealer.set_reveal_child(not self._sidebar_collapsed)
 
         # Matching spacer in label column so heights align
         label_spacer = Gtk.Box()
@@ -672,6 +673,8 @@ class MorningDashboard(Gtk.ApplicationWindow):
         else:
             self._collapse_btn.set_label("◀")
             self._collapse_btn.set_tooltip_text("Collapse sidebar")
+        self.prefs["sidebar_collapsed"] = self._sidebar_collapsed
+        save_prefs(self.prefs)
 
     def _switch_tab(self, key):
         """Switch stack to key and update sidebar active state."""
@@ -2705,9 +2708,13 @@ X-GNOME-Autostart-enabled=true
     # ── Bible Tab ─────────────────────────────────────────────────────────────
 
     def _build_bible_tab(self):
-        self._bible_book_idx    = 0
-        self._bible_chapter     = 1
-        self._bible_translation = 0  # index into BIBLE_TRANSLATIONS
+        saved_book  = min(self.prefs.get("bible_book", 0), len(BIBLE_BOOKS) - 1)
+        saved_ch    = self.prefs.get("bible_chapter", 1)
+        saved_trans = min(self.prefs.get("bible_translation", 0), len(BIBLE_TRANSLATIONS) - 1)
+
+        self._bible_book_idx    = saved_book
+        self._bible_chapter     = saved_ch
+        self._bible_translation = saved_trans
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         outer.add_css_class("tab-content")
@@ -2720,21 +2727,21 @@ X-GNOME-Autostart-enabled=true
         # Translation dropdown
         trans_names = [t[0] for t in BIBLE_TRANSLATIONS]
         self.bible_trans_combo = Gtk.DropDown.new_from_strings(trans_names)
-        self.bible_trans_combo.set_selected(0)
+        self.bible_trans_combo.set_selected(saved_trans)
         toolbar.append(self.bible_trans_combo)
 
         # Book dropdown
         book_names = [b[0] for b in BIBLE_BOOKS]
         self.bible_book_combo = Gtk.DropDown.new_from_strings(book_names)
-        self.bible_book_combo.set_selected(0)
+        self.bible_book_combo.set_selected(saved_book)
         self.bible_book_combo.connect("notify::selected", self._on_bible_book_changed)
         toolbar.append(self.bible_book_combo)
 
-        # Chapter spinner
+        # Chapter spinner — set range for saved book, then restore saved chapter
         self.bible_chapter_spin = Gtk.SpinButton()
-        self.bible_chapter_spin.set_range(1, BIBLE_BOOKS[0][2])
+        self.bible_chapter_spin.set_range(1, BIBLE_BOOKS[saved_book][2])
         self.bible_chapter_spin.set_increments(1, 5)
-        self.bible_chapter_spin.set_value(1)
+        self.bible_chapter_spin.set_value(saved_ch)
         self.bible_chapter_spin.set_digits(0)
         self.bible_chapter_spin.set_width_chars(4)
         toolbar.append(self.bible_chapter_spin)
@@ -2800,8 +2807,7 @@ X-GNOME-Autostart-enabled=true
 
         self.stack.add_named(outer, "bible")
 
-        # Load Genesis 1 by default
-        self._do_load_bible(0, 1)
+        self._do_load_bible(saved_book, saved_ch)
 
     def _on_bible_book_changed(self, combo, _):
         idx = combo.get_selected()
@@ -2819,6 +2825,10 @@ X-GNOME-Autostart-enabled=true
         self._bible_chapter  = chapter
         trans_idx = self.bible_trans_combo.get_selected()
         self._bible_translation = trans_idx
+        self.prefs["bible_book"] = book_idx
+        self.prefs["bible_chapter"] = chapter
+        self.prefs["bible_translation"] = trans_idx
+        save_prefs(self.prefs)
         book_name, book_id, max_ch = BIBLE_BOOKS[book_idx]
         trans_name = BIBLE_TRANSLATIONS[trans_idx][0]
         trans_id   = BIBLE_TRANSLATIONS[trans_idx][1]
