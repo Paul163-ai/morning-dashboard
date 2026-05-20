@@ -2838,7 +2838,22 @@ X-GNOME-Autostart-enabled=true
         GLib.idle_add(self._set_bible_text, text)
 
     def _set_bible_text(self, text):
-        self.bible_buffer.set_text(text)
+        import re
+        buf = self.bible_buffer
+        buf.set_text("")
+        tag_table = buf.get_tag_table()
+        sup_tag = tag_table.lookup("verse-num")
+        if sup_tag is None:
+            sup_tag = buf.create_tag("verse-num", rise=6000, scale=0.72, foreground="#888888")
+        pattern = re.compile(r'\[(\d+)\] ?')
+        pos = 0
+        for m in pattern.finditer(text):
+            if m.start() > pos:
+                buf.insert(buf.get_end_iter(), text[pos:m.start()])
+            buf.insert_with_tags(buf.get_end_iter(), m.group(1), sup_tag)
+            pos = m.end()
+        if pos < len(text):
+            buf.insert(buf.get_end_iter(), text[pos:])
 
     def _build_mcheyne_popover(self):
         today = datetime.date.today()
