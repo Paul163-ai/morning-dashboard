@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import gi
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk, Gdk, GLib, Pango, Gio
+from gi.repository import Gtk, Gdk, GLib, Pango, Gio, Graphene
 import requests
 import datetime
 import threading
@@ -17,8 +17,9 @@ SCOPES = [
     "https://www.googleapis.com/auth/userinfo.email",
     "openid",
 ]
-CREDENTIALS    = os.path.expanduser("~/morning-dashboard/credentials.json")
-TOKEN_FILE     = os.path.expanduser("~/morning-dashboard/token.json")
+PROJECT_DIR    = os.path.dirname(os.path.abspath(__file__))
+CREDENTIALS    = os.path.join(PROJECT_DIR, "credentials.json")
+TOKEN_FILE     = os.path.join(PROJECT_DIR, "token.json")
 DRIVE_FOLDER = "Morning Dashboard Backup"
 
 def get_drive_service():
@@ -91,7 +92,7 @@ def sync_sermons_to_drive(sermons_dir, status_cb):
 _DATA_FILES = [
     (os.path.expanduser("~/.config/morning-dashboard/spurgeon_notes.json"), "spurgeon_notes.json", "application/json"),
     (os.path.expanduser("~/.config/morning-dashboard/notes.txt"),           "notes.txt",           "text/plain"),
-    (os.path.expanduser("~/morning-dashboard/prayers.json"),                "prayers.json",        "application/json"),
+    (os.path.join(PROJECT_DIR, "prayers.json"),                             "prayers.json",        "application/json"),
 ]
 
 def sync_data_to_drive(status_cb=None):
@@ -473,6 +474,62 @@ def save_prefs(prefs):
     with open(PREFS_FILE, "w") as f:
         json.dump(prefs, f)
 
+# ── Custom TextView with theme-coloured cursor ────────────────────────────────
+# GTK4/libadwaita ignores CSS cursor-colour overrides when the system colour
+# scheme differs from the app's forced scheme. This subclass hides the native
+# cursor and paints a correctly-coloured one in do_snapshot() instead.
+
+class StyledTextView(Gtk.TextView):
+    __gtype_name__ = "StyledTextView"
+    _BLINK_MS = 530
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._cursor_rgba = None
+        self._blink_on = True
+        self._blink_id = None
+        self.connect("notify::has-focus", self._on_focus_change)
+        self.get_buffer().connect(
+            "notify::cursor-position", lambda *_: self.queue_draw()
+        )
+
+    def set_cursor_rgba(self, rgba):
+        self._cursor_rgba = rgba
+        self.set_cursor_visible(False)
+        self.queue_draw()
+
+    def _on_focus_change(self, *_):
+        if self.has_focus():
+            self._blink_on = True
+            if self._blink_id is None:
+                self._blink_id = GLib.timeout_add(self._BLINK_MS, self._blink_tick)
+        else:
+            if self._blink_id is not None:
+                GLib.source_remove(self._blink_id)
+                self._blink_id = None
+            self._blink_on = False
+        self.queue_draw()
+
+    def _blink_tick(self):
+        self._blink_on = not self._blink_on
+        self.queue_draw()
+        return GLib.SOURCE_CONTINUE
+
+    def do_snapshot(self, snapshot):
+        Gtk.TextView.do_snapshot(self, snapshot)
+        if not self._cursor_rgba or not self.has_focus() or not self._blink_on:
+            return
+        buf = self.get_buffer()
+        it = buf.get_iter_at_mark(buf.get_insert())
+        rect = self.get_iter_location(it)
+        wx, wy = self.buffer_to_window_coords(
+            Gtk.TextWindowType.WIDGET, rect.x, rect.y
+        )
+        r = Graphene.Rect()
+        r.init(wx, wy, 2.0, max(float(rect.height), 1.0))
+        snapshot.append_color(self._cursor_rgba, r)
+
+
 # ── Main Window ───────────────────────────────────────────────────────────────
 
 class MorningDashboard(Gtk.ApplicationWindow):
@@ -737,6 +794,13 @@ class MorningDashboard(Gtk.ApplicationWindow):
             self._saved_h = h
 
     def _on_close_request(self, *args):
+        if hasattr(self, "_notes_save_id") and self._notes_save_id is not None:
+            GLib.source_remove(self._notes_save_id)
+            self._notes_save()
+        if hasattr(self, "_spurgeon_notes_save_id") and self._spurgeon_notes_save_id is not None:
+            GLib.source_remove(self._spurgeon_notes_save_id)
+            self._spurgeon_notes_save()
+
         self.prefs["window_width"] = self._saved_w
         self.prefs["window_height"] = self._saved_h
         save_prefs(self.prefs)
@@ -900,10 +964,17 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 color: {reading};
                 line-height: 1.8;
             }}
-            .reading-text text {{
+            .reading-text, .reading-text text, .reading-text text cursor {{
                 font-size: {fs}px;
-                color: {reading};
-                background-color: {bg};
+                color: {reading} !important;
+                background-color: {bg} !important;
+                caret-color: {reading} !important;
+                -gtk-cursor-color: {reading} !important;
+            }}
+            .reading-text text cursor {{
+                color: {reading} !important;
+                background-color: {reading} !important;
+                border-color: {reading} !important;
             }}
             .news-button {{
                 background-color: transparent;
@@ -981,18 +1052,19 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 font-size: {fs}px;
             }}
             .sermon-list-item:hover {{ background-color: {accent}; color: #ffffff; }}
-            textview {{
-                color: {text};
-                background-color: {bg};
+            /* Universal Caret/Cursor Styling for All Input Widgets */
+            entry, entry text, textview, textview text, text, cursor, .cursor {{
+                caret-color: {text} !important;
+                -gtk-cursor-color: {text} !important;
             }}
-            textview text {{
-                color: {text};
-                background-color: {bg};
-            }}
-            textview text cursor {{
+            entry text cursor, textview text cursor, cursor, .cursor {{
                 color: {text} !important;
                 background-color: {text} !important;
                 border-color: {text} !important;
+            }}
+            textview, textview text {{
+                color: {text};
+                background-color: {bg};
             }}
             .cal-event-time {{
                 font-size: {fs - 1}px;
@@ -1020,10 +1092,11 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 line-height: 1.9;
                 background-color: {bg};
             }}
-            .bible-verse text {{
+            .bible-verse, .bible-verse text, .bible-verse text cursor {{
                 color: {reading} !important;
                 background-color: {bg} !important;
                 caret-color: {reading} !important;
+                -gtk-cursor-color: {reading} !important;
             }}
             .bible-verse text cursor {{
                 color: {reading} !important;
@@ -1031,12 +1104,19 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 border-color: {reading} !important;
             }}
             .spurgeon-notes {{
-                background-color: #2d1b0e;
-                color: #d4a96a;
+                background-color: #2d1b0e !important;
+                color: #d4a96a !important;
             }}
-            .spurgeon-notes text {{
-                background-color: #2d1b0e;
-                color: #d4a96a;
+            .spurgeon-notes, .spurgeon-notes text, .spurgeon-notes text cursor {{
+                background-color: #2d1b0e !important;
+                color: #d4a96a !important;
+                caret-color: #d4a96a !important;
+                -gtk-cursor-color: #d4a96a !important;
+            }}
+            .spurgeon-notes text cursor {{
+                color: #d4a96a !important;
+                background-color: #d4a96a !important;
+                border-color: #d4a96a !important;
             }}
             .prayer-item {{
                 background-color: {tab_active};
@@ -1122,6 +1202,14 @@ class MorningDashboard(Gtk.ApplicationWindow):
             self.get_display(), self.css_provider,
             Gtk.STYLE_PROVIDER_PRIORITY_USER
         )
+
+        cursor_rgba = Gdk.RGBA()
+        cursor_rgba.parse(text)
+        self._theme_cursor_rgba = cursor_rgba
+        for attr in ("sermon_view", "notes_view"):
+            view = getattr(self, attr, None)
+            if view is not None:
+                view.set_cursor_rgba(cursor_rgba)
 
     def _get_signed_in_account(self):
         """Return the email of the currently signed-in Google account, or None."""
@@ -1702,7 +1790,7 @@ X-GNOME-Autostart-enabled=true
         (os.path.expanduser("~/.config/morning-dashboard/prefs.json"),          "prefs.json"),
         (os.path.expanduser("~/.config/morning-dashboard/spurgeon_notes.json"), "spurgeon_notes.json"),
         (os.path.expanduser("~/.config/morning-dashboard/notes.txt"),           "notes.txt"),
-        (os.path.expanduser("~/morning-dashboard/prayers.json"),                "prayers.json"),
+        (os.path.join(PROJECT_DIR, "prayers.json"),                             "prayers.json"),
     ]
 
     def _export_data(self, btn):
@@ -1873,8 +1961,16 @@ X-GNOME-Autostart-enabled=true
         self.spurgeon_view.set_bottom_margin(10)
         self.spurgeon_view.add_css_class("reading-text")
 
+        self._spurgeon_focus_gained = False
+        self._spurgeon_press_pos = None
+        focus_ctrl = Gtk.EventControllerFocus.new()
+        focus_ctrl.connect("enter", lambda c: setattr(self, '_spurgeon_focus_gained', True))
+        self.spurgeon_view.add_controller(focus_ctrl)
+
         click = Gtk.GestureClick.new()
+        click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         click.connect("pressed", self._spurgeon_link_clicked)
+        click.connect("released", self._spurgeon_click_released)
         self.spurgeon_view.add_controller(click)
 
         motion = Gtk.EventControllerMotion.new()
@@ -1911,7 +2007,7 @@ X-GNOME-Autostart-enabled=true
         notes_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         notes_scroll.set_vexpand(True)
 
-        self.spurgeon_notes_view = Gtk.TextView()
+        self.spurgeon_notes_view = StyledTextView()
         self.spurgeon_notes_view.set_wrap_mode(Gtk.WrapMode.WORD)
         self.spurgeon_notes_view.add_css_class("bible-verse")
         self.spurgeon_notes_view.add_css_class("spurgeon-notes")
@@ -1923,6 +2019,9 @@ X-GNOME-Autostart-enabled=true
             "changed", self._spurgeon_notes_on_change
         )
         self.spurgeon_notes_view.connect("map", lambda w: w.grab_focus())
+        _snv_rgba = Gdk.RGBA()
+        _snv_rgba.parse("#d4a96a")
+        self.spurgeon_notes_view.set_cursor_rgba(_snv_rgba)
 
         notes_scroll.set_child(self.spurgeon_notes_view)
         right_box.append(notes_scroll)
@@ -2080,6 +2179,7 @@ X-GNOME-Autostart-enabled=true
         return None
 
     def _spurgeon_link_clicked(self, gesture, n_press, x, y):
+        self._spurgeon_press_pos = (x, y)
         bx, by = self.spurgeon_view.window_to_buffer_coords(
             Gtk.TextWindowType.WIDGET, int(x), int(y)
         )
@@ -2089,11 +2189,21 @@ X-GNOME-Autostart-enabled=true
         link_tag = self.spurgeon_buffer.get_tag_table().lookup("link")
         if not it.has_tag(link_tag):
             return
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         offset = it.get_offset()
         for start_off, end_off, book_idx, chapter in self._spurgeon_links:
             if start_off <= offset < end_off:
                 self._open_bible_ref(book_idx, chapter)
                 break
+
+    def _spurgeon_click_released(self, gesture, n_press, x, y):
+        if not (self._spurgeon_focus_gained and n_press == 1):
+            return
+        self._spurgeon_focus_gained = False
+        press = self._spurgeon_press_pos
+        if press is None or (abs(x - press[0]) < 8 and abs(y - press[1]) < 8):
+            it = self.spurgeon_buffer.get_iter_at_mark(self.spurgeon_buffer.get_insert())
+            self.spurgeon_buffer.place_cursor(it)
 
     def _spurgeon_motion(self, controller, x, y):
         bx, by = self.spurgeon_view.window_to_buffer_coords(
@@ -2501,13 +2611,15 @@ X-GNOME-Autostart-enabled=true
         scroll_text.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
         self.sermon_buffer = Gtk.TextBuffer()
-        self.sermon_view = Gtk.TextView(buffer=self.sermon_buffer)
+        self.sermon_view = StyledTextView(buffer=self.sermon_buffer)
         self.sermon_view.set_wrap_mode(Gtk.WrapMode.WORD)
         self.sermon_view.set_left_margin(12)
         self.sermon_view.set_right_margin(12)
         self.sermon_view.set_top_margin(10)
         self.sermon_view.set_bottom_margin(10)
         self.sermon_view.add_css_class("reading-text")
+        if hasattr(self, "_theme_cursor_rgba"):
+            self.sermon_view.set_cursor_rgba(self._theme_cursor_rgba)
 
         scroll_text.set_child(self.sermon_view)
         right.append(scroll_text)
@@ -2552,6 +2664,16 @@ X-GNOME-Autostart-enabled=true
         text  = self.sermon_buffer.get_text(start, end, True)
         fname = title.replace("/", "-") + ".txt"
         fpath = os.path.join(self.sermons_dir, fname)
+
+        # Clean up old file if sermon is renamed
+        if self.current_sermon_file and self.current_sermon_file != fname:
+            old_path = os.path.join(self.sermons_dir, self.current_sermon_file)
+            try:
+                if os.path.exists(old_path):
+                    os.remove(old_path)
+            except Exception:
+                pass
+
         with open(fpath, "w") as f:
             f.write(text)
         self.current_sermon_file = fname
@@ -2922,7 +3044,7 @@ X-GNOME-Autostart-enabled=true
     # ── Prayer List Tab ───────────────────────────────────────────────────────
 
     def _build_prayer_tab(self):
-        PRAYER_FILE = os.path.expanduser("~/morning-dashboard/prayers.json")
+        PRAYER_FILE = os.path.join(PROJECT_DIR, "prayers.json")
         self.prayer_file = PRAYER_FILE
         self._prayer_adding_child_for = None
 
@@ -3168,7 +3290,7 @@ X-GNOME-Autostart-enabled=true
         scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         scroll.set_vexpand(True)
 
-        self.notes_view = Gtk.TextView()
+        self.notes_view = StyledTextView()
         self.notes_view.set_wrap_mode(Gtk.WrapMode.WORD)
         self.notes_view.add_css_class("bible-verse")
         self.notes_view.set_left_margin(8)
@@ -3183,6 +3305,8 @@ X-GNOME-Autostart-enabled=true
             pass
 
         self.notes_view.get_buffer().connect("changed", self._notes_on_change)
+        if hasattr(self, "_theme_cursor_rgba"):
+            self.notes_view.set_cursor_rgba(self._theme_cursor_rgba)
 
         scroll.set_child(self.notes_view)
         outer.append(scroll)
