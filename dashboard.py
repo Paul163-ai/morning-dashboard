@@ -1884,7 +1884,7 @@ X-GNOME-Autostart-enabled=true
             return
         path = file.get_path()
         try:
-            sermons_dir = os.path.expanduser("~/morning-dashboard/sermons")
+            sermons_dir = os.path.expanduser("~/.config/morning-dashboard/sermons")
             with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
                 for src, arcname in self._BACKUP_FILES:
                     if os.path.exists(src):
@@ -1919,7 +1919,7 @@ X-GNOME-Autostart-enabled=true
             return
         path = file.get_path()
         dest_map = {arcname: src for src, arcname in self._BACKUP_FILES}
-        sermons_dir = os.path.expanduser("~/morning-dashboard/sermons")
+        sermons_dir = os.path.expanduser("~/.config/morning-dashboard/sermons")
         try:
             with zipfile.ZipFile(path, "r") as zf:
                 for name in zf.namelist():
@@ -1952,7 +1952,7 @@ X-GNOME-Autostart-enabled=true
                 if msg.startswith("❌"):
                     state["ok"] = False
                 GLib.idle_add(self._backup_status.set_text, msg)
-            sermons_dir = os.path.expanduser("~/morning-dashboard/sermons")
+            sermons_dir = os.path.expanduser("~/.config/morning-dashboard/sermons")
             sync_sermons_to_drive(sermons_dir, cb)
             if state["ok"]:
                 sync_data_to_drive(cb)
@@ -2606,7 +2606,7 @@ X-GNOME-Autostart-enabled=true
     # ── Sermon Notes Tab ──────────────────────────────────────────────────────
 
     def _build_sermon_tab(self):
-        SERMONS_DIR = os.path.expanduser("~/morning-dashboard/sermons")
+        SERMONS_DIR = os.path.expanduser("~/.config/morning-dashboard/sermons")
         os.makedirs(SERMONS_DIR, exist_ok=True)
         self.sermons_dir = SERMONS_DIR
         self.current_sermon_file = None
