@@ -14,10 +14,10 @@ A personal daily briefing app for the Linux desktop, built with Python and GTK4.
 - 📜 Bible reader — 10 translations, all 66 books
 - ✍️ Sermon notes with Google Drive sync
 - 📅 Google Calendar — 7-day view across all calendars
-- 🙏 Prayer list with checkboxes and reordering
+- 🙏 Prayer list with checkboxes, reordering, and web app sync
 - 📝 Notes — freeform, auto-saving
 - Collapsible sidebar navigation with per-tab accent colours
-- ⚙️ Preferences — dark/light theme, font size, location search, tab visibility/ordering, data export/import, autostart
+- ⚙️ Preferences — dark/light theme, font size, location search, tab visibility/ordering, data export/import, web app prayer sync, autostart
 
 ## Requirements
 
