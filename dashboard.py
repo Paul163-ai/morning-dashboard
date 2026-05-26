@@ -552,6 +552,9 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self.visible_tabs = self.prefs.get("visible_tabs", ALL_TABS[:])
         self.tab_order = self.prefs.get("tab_order", ALL_TABS[:])
         self.api_bible_key = self.prefs.get("api_bible_key", "")
+        self.web_url  = self.prefs.get("web_url", "")
+        self.web_user = self.prefs.get("web_user", "")
+        self.web_pass = self.prefs.get("web_pass", "")
 
         # Restore window size
         win_w = self.prefs.get("window_width", 900)
@@ -1675,6 +1678,9 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 list(tab_visible_state) or ALL_TABS[:],
                 tab_order_state[:],
                 bible_key_entry.get_text().strip(),
+                web_url_entry.get_text().strip(),
+                web_user_entry.get_text().strip(),
+                web_pass_entry.get_text(),
             )
             if startup_check.get_active():
                 os.makedirs(os.path.dirname(AUTOSTART_FILE), exist_ok=True)
@@ -1700,6 +1706,63 @@ X-GNOME-Autostart-enabled=true
             return False
 
         dialog.connect("close-request", on_close_request)
+
+        # ── Web App Sync ──────────────────────────────────────────────────────
+        web_header = Gtk.Label(label="WEB APP SYNC")
+        web_header.add_css_class("source-label")
+        web_header.set_halign(Gtk.Align.START)
+        box.append(web_header)
+
+        def _web_row(label_text, default, visibility=True):
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            lbl = Gtk.Label(label=label_text)
+            lbl.add_css_class("date-label")
+            lbl.set_width_chars(10)
+            lbl.set_halign(Gtk.Align.START)
+            entry = Gtk.Entry()
+            entry.set_text(default)
+            entry.set_hexpand(True)
+            entry.set_visibility(visibility)
+            row.append(lbl)
+            row.append(entry)
+            box.append(row)
+            return entry
+
+        web_url_entry  = _web_row("URL:",      self.web_url)
+        web_user_entry = _web_row("Username:", self.web_user)
+        web_pass_entry = _web_row("Password:", self.web_pass, visibility=False)
+
+        web_sync_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        push_btn = Gtk.Button(label="⬆ Push prayers to web")
+        push_btn.add_css_class("sermon-btn")
+        pull_btn = Gtk.Button(label="⬇ Pull prayers from web")
+        pull_btn.add_css_class("sermon-btn")
+        web_sync_row.append(push_btn)
+        web_sync_row.append(pull_btn)
+        box.append(web_sync_row)
+
+        self._web_sync_status = Gtk.Label(label="")
+        self._web_sync_status.add_css_class("date-label")
+        self._web_sync_status.set_halign(Gtk.Align.START)
+        self._web_sync_status.set_wrap(True)
+        box.append(self._web_sync_status)
+
+        def on_push(b):
+            self._prayer_push_to_web(
+                web_url_entry.get_text().strip(),
+                web_user_entry.get_text().strip(),
+                web_pass_entry.get_text(),
+                self._web_sync_status,
+            )
+        def on_pull(b):
+            self._prayer_pull_from_web(
+                web_url_entry.get_text().strip(),
+                web_user_entry.get_text().strip(),
+                web_pass_entry.get_text(),
+                self._web_sync_status,
+            )
+        push_btn.connect("clicked", on_push)
+        pull_btn.connect("clicked", on_pull)
 
         # ── Export / Import ───────────────────────────────────────────────────
         data_header = Gtk.Label(label="PERSONAL DATA")
@@ -1751,7 +1814,7 @@ X-GNOME-Autostart-enabled=true
         dialog.set_child(outer)
         dialog.present()
 
-    def _save_prefs(self, font_size, theme, weather_location, weather_lat, weather_lon, enabled_calendars, visible_tabs, tab_order, api_bible_key=""):
+    def _save_prefs(self, font_size, theme, weather_location, weather_lat, weather_lon, enabled_calendars, visible_tabs, tab_order, api_bible_key="", web_url="", web_user="", web_pass=""):
         self.font_size = font_size
         self.theme = theme
         self.weather_location = weather_location
@@ -1761,6 +1824,9 @@ X-GNOME-Autostart-enabled=true
         self.visible_tabs = visible_tabs
         self.tab_order = tab_order
         self.api_bible_key = api_bible_key
+        self.web_url  = web_url
+        self.web_user = web_user
+        self.web_pass = web_pass
         self.prefs.update({
             "font_size": font_size,
             "theme": theme,
@@ -1771,6 +1837,9 @@ X-GNOME-Autostart-enabled=true
             "visible_tabs": visible_tabs,
             "tab_order": tab_order,
             "api_bible_key": api_bible_key,
+            "web_url":  web_url,
+            "web_user": web_user,
+            "web_pass": web_pass,
         })
         save_prefs(self.prefs)
         self._apply_css()
@@ -3105,6 +3174,52 @@ X-GNOME-Autostart-enabled=true
     def _prayer_save(self):
         with open(self.prayer_file, "w") as f:
             json.dump(self.prayers, f, indent=2)
+
+    def _prayer_push_to_web(self, url, user, password, status_lbl):
+        if not url:
+            GLib.idle_add(status_lbl.set_text, "❌ No web app URL configured in settings.")
+            return
+        GLib.idle_add(status_lbl.set_text, "Pushing prayers…")
+        def run():
+            try:
+                r = requests.post(
+                    url.rstrip("/") + "/api/prayers.php",
+                    json={"prayers": self.prayers},
+                    auth=(user, password),
+                    timeout=10,
+                )
+                if r.ok:
+                    GLib.idle_add(status_lbl.set_text, "✅ Prayers pushed to web app.")
+                else:
+                    GLib.idle_add(status_lbl.set_text, f"❌ Server returned {r.status_code}.")
+            except Exception as e:
+                GLib.idle_add(status_lbl.set_text, f"❌ {e}")
+        threading.Thread(target=run, daemon=True).start()
+
+    def _prayer_pull_from_web(self, url, user, password, status_lbl):
+        if not url:
+            GLib.idle_add(status_lbl.set_text, "❌ No web app URL configured in settings.")
+            return
+        GLib.idle_add(status_lbl.set_text, "Pulling prayers…")
+        def run():
+            try:
+                r = requests.get(
+                    url.rstrip("/") + "/api/prayers.php",
+                    auth=(user, password),
+                    timeout=10,
+                )
+                if r.ok:
+                    data = r.json()
+                    prayers = data.get("prayers", [])
+                    self.prayers = prayers
+                    self._prayer_save()
+                    GLib.idle_add(self._prayer_render)
+                    GLib.idle_add(status_lbl.set_text, "✅ Prayers pulled from web app.")
+                else:
+                    GLib.idle_add(status_lbl.set_text, f"❌ Server returned {r.status_code}.")
+            except Exception as e:
+                GLib.idle_add(status_lbl.set_text, f"❌ {e}")
+        threading.Thread(target=run, daemon=True).start()
 
     def _prayer_render(self):
         child = self.prayer_list_box.get_first_child()
