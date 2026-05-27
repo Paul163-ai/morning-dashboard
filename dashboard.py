@@ -8,6 +8,7 @@ import threading
 import json
 import os
 import zipfile
+import html as html_lib
 
 # ── Google Drive helper ───────────────────────────────────────────────────────
 
@@ -425,11 +426,23 @@ def fetch_spurgeon(date=None):
 
     return "\n\n─────────────────────────────────\n\n".join(results)
 
+# ── Web URL helper ────────────────────────────────────────────────────────────
+
+def _normalize_url(url: str) -> str:
+    """Ensure a URL has a scheme and no trailing slash."""
+    url = url.strip()
+    if url and not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    return url.rstrip("/")
+
 # ── News helper ───────────────────────────────────────────────────────────────
 
 NEWS_SOURCES = {
     "BBC News":    "https://feeds.bbci.co.uk/news/rss.xml",
     "Google News": "https://news.google.com/rss",
+    "Open Doors":  "https://www.opendoorsuk.org/feed/",
+    "Christianity Today": "https://www.christianitytoday.com/feed/",
+    "TED Talks":   "https://feeds.acast.com/public/shows/67587e77c705e441797aff96",
     "AI News":     "https://feeds.feedburner.com/TheHackersNews",
     "Tech News":   "https://feeds.bbci.co.uk/news/technology/rss.xml",
 }
@@ -446,6 +459,7 @@ def fetch_news(url):
             link  = re.search(r'<link>(.*?)</link>',  item, re.DOTALL)
             if title:
                 t = re.sub(r'<!\[CDATA\[(.*?)\]\]>', r'\1', title.group(1)).strip()
+                t = html_lib.unescape(t)
                 l = link.group(1).strip() if link else ""
                 results.append((t, l))
         return results
@@ -957,6 +971,19 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 border-radius: 10px;
                 padding: 12px 16px;
                 margin-bottom: 6px;
+            }}
+            .spur-comment-card {{
+                background-color: {'transparent' if dark else '#ffffff'};
+                border-left: 3px solid {'#f0a500' if dark else '#b87800'};
+                border-radius: 0 4px 4px 0;
+                padding: 6px 10px;
+                margin-bottom: 4px;
+            }}
+            .spur-comment-ts {{
+                color: {subtext};
+            }}
+            .spur-comment-text {{
+                color: {text};
             }}
             .section-title {{
                 font-size: 16px; font-weight: bold;
@@ -1764,6 +1791,31 @@ X-GNOME-Autostart-enabled=true
         push_btn.connect("clicked", on_push)
         pull_btn.connect("clicked", on_pull)
 
+        # ── Web App Admin ──────────────────────────────────────────────────────
+        admin_header = Gtk.Label(label="WEB APP ADMIN")
+        admin_header.add_css_class("source-label")
+        admin_header.set_halign(Gtk.Align.START)
+        box.append(admin_header)
+
+        admin_requests_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        admin_status_lbl = Gtk.Label(label="")
+        admin_status_lbl.add_css_class("date-label")
+        admin_status_lbl.set_halign(Gtk.Align.START)
+        admin_status_lbl.set_wrap(True)
+
+        load_req_btn = Gtk.Button(label="🔄 Load access requests")
+        load_req_btn.add_css_class("sermon-btn")
+        load_req_btn.connect("clicked", lambda b: self._admin_load_requests(
+            web_url_entry.get_text().strip(),
+            web_user_entry.get_text().strip(),
+            web_pass_entry.get_text(),
+            admin_requests_box,
+            admin_status_lbl,
+        ))
+        box.append(load_req_btn)
+        box.append(admin_status_lbl)
+        box.append(admin_requests_box)
+
         # ── Export / Import ───────────────────────────────────────────────────
         data_header = Gtk.Label(label="PERSONAL DATA")
         data_header.add_css_class("source-label")
@@ -2074,7 +2126,7 @@ X-GNOME-Autostart-enabled=true
 
         notes_scroll = Gtk.ScrolledWindow()
         notes_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        notes_scroll.set_vexpand(True)
+        notes_scroll.set_size_request(-1, 140)
 
         self.spurgeon_notes_view = StyledTextView()
         self.spurgeon_notes_view.set_wrap_mode(Gtk.WrapMode.WORD)
@@ -2095,6 +2147,45 @@ X-GNOME-Autostart-enabled=true
         notes_scroll.set_child(self.spurgeon_notes_view)
         right_box.append(notes_scroll)
 
+        # ── Community comments ────────────────────────────────────────────────
+        right_box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
+        comments_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        comments_header.set_margin_top(4)
+        comm_lbl = Gtk.Label(label="Community Comments")
+        comm_lbl.add_css_class("section-title")
+        comm_lbl.set_halign(Gtk.Align.START)
+        comm_lbl.set_hexpand(True)
+        comments_header.append(comm_lbl)
+        refresh_comm_btn = Gtk.Button(label="↻")
+        refresh_comm_btn.add_css_class("sermon-btn")
+        refresh_comm_btn.set_tooltip_text("Refresh comments")
+        refresh_comm_btn.connect("clicked", lambda b: self._spurgeon_comments_load())
+        comments_header.append(refresh_comm_btn)
+        right_box.append(comments_header)
+
+        self._spurgeon_comments_scroll = Gtk.ScrolledWindow()
+        self._spurgeon_comments_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._spurgeon_comments_scroll.set_vexpand(True)
+        self._spurgeon_comments_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self._spurgeon_comments_box.set_margin_top(4)
+        self._spurgeon_comments_box.set_margin_bottom(4)
+        self._spurgeon_comments_scroll.set_child(self._spurgeon_comments_box)
+        right_box.append(self._spurgeon_comments_scroll)
+
+        comment_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        comment_row.set_margin_top(4)
+        self._spurgeon_comment_entry = Gtk.Entry()
+        self._spurgeon_comment_entry.set_placeholder_text("Add a comment…")
+        self._spurgeon_comment_entry.set_hexpand(True)
+        self._spurgeon_comment_entry.connect("activate", self._spurgeon_comment_post)
+        comment_row.append(self._spurgeon_comment_entry)
+        post_btn = Gtk.Button(label="Post")
+        post_btn.add_css_class("sermon-btn")
+        post_btn.connect("clicked", self._spurgeon_comment_post)
+        comment_row.append(post_btn)
+        right_box.append(comment_row)
+
         # ── Paned container ───────────────────────────────────────────────────
         paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         paned.set_wide_handle(True)
@@ -2109,6 +2200,7 @@ X-GNOME-Autostart-enabled=true
         self.stack.add_named(paned, "spurgeon")
 
         self._spurgeon_notes_load()
+        self._spurgeon_comments_load()
         threading.Thread(target=self._load_spurgeon, daemon=True).start()
 
     def _spurgeon_prev(self, btn):
@@ -2129,6 +2221,7 @@ X-GNOME-Autostart-enabled=true
         self.spurgeon_notes_date_label.set_text("Notes — " + date_str)
         self.spurgeon_buffer.set_text("Loading…")
         self._spurgeon_notes_load()
+        self._spurgeon_comments_load()
         threading.Thread(target=self._load_spurgeon, daemon=True).start()
 
     def _load_spurgeon(self):
@@ -2368,6 +2461,143 @@ X-GNOME-Autostart-enabled=true
         with open(self._spurgeon_notes_file, "w") as f:
             json.dump(data, f, indent=2)
         return False
+
+    # ── Spurgeon community comments ───────────────────────────────────────────
+
+    def _spurgeon_comments_load(self):
+        if not self.web_url:
+            GLib.idle_add(self._spurgeon_comments_render, None)
+            return
+        date_str = self._spurgeon_date.strftime("%Y-%m-%d")
+        def run():
+            try:
+                r = requests.get(
+                    _normalize_url(self.web_url) + "/api/spurgeon_comments.php",
+                    params={"date": date_str},
+                    auth=(self.web_user, self.web_pass),
+                    timeout=10,
+                )
+                if r.ok:
+                    result = r.json().get("comments", [])
+                else:
+                    result = f"Server returned HTTP {r.status_code}"
+            except Exception as e:
+                result = str(e)
+            GLib.idle_add(self._spurgeon_comments_render, result)
+        threading.Thread(target=run, daemon=True).start()
+
+    def _spurgeon_comments_render(self, comments):
+        child = self._spurgeon_comments_box.get_first_child()
+        while child:
+            nxt = child.get_next_sibling()
+            self._spurgeon_comments_box.remove(child)
+            child = nxt
+
+        if comments is None:
+            lbl = Gtk.Label(label="Configure web app URL in Settings to see community comments.")
+            lbl.add_css_class("status-label")
+            lbl.set_wrap(True)
+            lbl.set_xalign(0)
+            self._spurgeon_comments_box.append(lbl)
+            return
+
+        if isinstance(comments, str):
+            lbl = Gtk.Label(label=f"❌ {comments}")
+            lbl.add_css_class("status-label")
+            lbl.set_wrap(True)
+            lbl.set_xalign(0)
+            self._spurgeon_comments_box.append(lbl)
+            return
+
+        if not comments:
+            lbl = Gtk.Label(label="No comments yet — be the first!")
+            lbl.add_css_class("status-label")
+            lbl.set_xalign(0)
+            self._spurgeon_comments_box.append(lbl)
+            return
+
+        for c in comments:
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            card.add_css_class("spur-comment-card")
+            card.set_margin_start(4)
+            card.set_margin_end(4)
+
+            header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+
+            user_lbl = Gtk.Label(label=c.get("username", "?"))
+            user_lbl.add_css_class("spur-comment-text")
+            user_lbl.set_halign(Gtk.Align.START)
+            attrs = Pango.AttrList()
+            attrs.insert(Pango.attr_weight_new(Pango.Weight.BOLD))
+            user_lbl.set_attributes(attrs)
+            header_row.append(user_lbl)
+
+            ts = c.get("timestamp", 0)
+            try:
+                ts_str = datetime.datetime.fromtimestamp(ts).strftime("%d %b %Y %H:%M")
+            except Exception:
+                ts_str = ""
+            ts_lbl = Gtk.Label(label=ts_str)
+            ts_lbl.add_css_class("spur-comment-ts")
+            ts_lbl.set_halign(Gtk.Align.START)
+            ts_lbl.set_hexpand(True)
+            header_row.append(ts_lbl)
+
+            del_btn = Gtk.Button(label="✕")
+            del_btn.add_css_class("sermon-btn")
+            del_btn.set_tooltip_text("Delete comment")
+            cid = c.get("id", "")
+            del_btn.connect("clicked", lambda b, _id=cid: self._spurgeon_comment_delete(_id))
+            header_row.append(del_btn)
+
+            card.append(header_row)
+
+            text_lbl = Gtk.Label(label=c.get("text", ""))
+            text_lbl.add_css_class("spur-comment-text")
+            text_lbl.set_wrap(True)
+            text_lbl.set_xalign(0)
+            text_lbl.set_halign(Gtk.Align.FILL)
+            card.append(text_lbl)
+
+            self._spurgeon_comments_box.append(card)
+
+    def _spurgeon_comment_post(self, widget):
+        text = self._spurgeon_comment_entry.get_text().strip()
+        if not text or not self.web_url:
+            return
+        self._spurgeon_comment_entry.set_text("")
+        date_str = self._spurgeon_date.strftime("%Y-%m-%d")
+        def run():
+            try:
+                r = requests.post(
+                    _normalize_url(self.web_url) + "/api/spurgeon_comments.php",
+                    json={"date": date_str, "text": text},
+                    auth=(self.web_user, self.web_pass),
+                    timeout=10,
+                )
+                if r.ok:
+                    GLib.idle_add(self._spurgeon_comments_load)
+            except Exception:
+                pass
+        threading.Thread(target=run, daemon=True).start()
+
+    def _spurgeon_comment_delete(self, comment_id):
+        if not self.web_url:
+            return
+        date_str = self._spurgeon_date.strftime("%Y-%m-%d")
+        def run():
+            try:
+                r = requests.delete(
+                    _normalize_url(self.web_url) + "/api/spurgeon_comments.php",
+                    json={"date": date_str, "id": comment_id},
+                    auth=(self.web_user, self.web_pass),
+                    timeout=10,
+                )
+                if r.ok:
+                    GLib.idle_add(self._spurgeon_comments_load)
+            except Exception:
+                pass
+        threading.Thread(target=run, daemon=True).start()
 
     # ── News Tab ──────────────────────────────────────────────────────────────
 
@@ -3183,7 +3413,7 @@ X-GNOME-Autostart-enabled=true
         def run():
             try:
                 r = requests.post(
-                    url.rstrip("/") + "/api/prayers.php",
+                    _normalize_url(url) + "/api/prayers.php",
                     json={"prayers": self.prayers},
                     auth=(user, password),
                     timeout=10,
@@ -3204,7 +3434,7 @@ X-GNOME-Autostart-enabled=true
         def run():
             try:
                 r = requests.get(
-                    url.rstrip("/") + "/api/prayers.php",
+                    _normalize_url(url) + "/api/prayers.php",
                     auth=(user, password),
                     timeout=10,
                 )
@@ -3219,6 +3449,148 @@ X-GNOME-Autostart-enabled=true
                     GLib.idle_add(status_lbl.set_text, f"❌ Server returned {r.status_code}.")
             except Exception as e:
                 GLib.idle_add(status_lbl.set_text, f"❌ {e}")
+        threading.Thread(target=run, daemon=True).start()
+
+    # ── Web App Admin ──────────────────────────────────────────────────────────
+
+    def _admin_load_requests(self, url, user, password, requests_box, status_lbl):
+        if not url:
+            GLib.idle_add(status_lbl.set_text, "❌ No web app URL configured.")
+            return
+        GLib.idle_add(status_lbl.set_text, "Loading…")
+
+        def run():
+            try:
+                r = requests.get(
+                    _normalize_url(url) + "/api/access.php",
+                    params={"action": "list"},
+                    auth=(user, password),
+                    timeout=10,
+                )
+                if r.status_code == 403:
+                    GLib.idle_add(status_lbl.set_text, "❌ Not authorised (admin only).")
+                    return
+                if not r.ok:
+                    GLib.idle_add(status_lbl.set_text, f"❌ Server returned {r.status_code}.")
+                    return
+                pending = [x for x in r.json().get("requests", []) if x.get("status") == "pending"]
+                GLib.idle_add(self._admin_render_requests,
+                              requests_box, status_lbl, pending, url, user, password)
+            except Exception as e:
+                GLib.idle_add(status_lbl.set_text, f"❌ {e}")
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _admin_render_requests(self, requests_box, status_lbl, pending, url, user, password):
+        # Clear previous results
+        child = requests_box.get_first_child()
+        while child:
+            nxt = child.get_next_sibling()
+            requests_box.remove(child)
+            child = nxt
+
+        if not pending:
+            status_lbl.set_text("✅ No pending requests.")
+            return
+
+        n = len(pending)
+        status_lbl.set_text(f"{n} pending request{'s' if n != 1 else ''}:")
+
+        for req in pending:
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            card.add_css_class("card-subtle")
+
+            # Username + name
+            top_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            uname = Gtk.Label(label=req.get("username", ""))
+            uname.set_markup(f"<b>{uname.get_text()}</b>")
+            uname.set_halign(Gtk.Align.START)
+            name_lbl = Gtk.Label(label=req.get("name", ""))
+            name_lbl.add_css_class("date-label")
+            name_lbl.set_halign(Gtk.Align.START)
+            name_lbl.set_hexpand(True)
+            top_row.append(uname)
+            top_row.append(name_lbl)
+            card.append(top_row)
+
+            if req.get("reason"):
+                reason_lbl = Gtk.Label(label=req["reason"])
+                reason_lbl.add_css_class("date-label")
+                reason_lbl.set_halign(Gtk.Align.START)
+                reason_lbl.set_wrap(True)
+                card.append(reason_lbl)
+
+            date_lbl = Gtk.Label(label=req.get("requested", ""))
+            date_lbl.add_css_class("date-label")
+            date_lbl.set_halign(Gtk.Align.START)
+            card.append(date_lbl)
+
+            btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            btn_row.set_margin_top(4)
+            approve_btn = Gtk.Button(label="✅ Approve")
+            approve_btn.add_css_class("sermon-btn")
+            deny_btn = Gtk.Button(label="✗ Deny")
+            deny_btn.add_css_class("sermon-btn")
+            result_lbl = Gtk.Label(label="")
+            result_lbl.add_css_class("date-label")
+            result_lbl.set_halign(Gtk.Align.START)
+            result_lbl.set_hexpand(True)
+            btn_row.append(approve_btn)
+            btn_row.append(deny_btn)
+            btn_row.append(result_lbl)
+            card.append(btn_row)
+
+            def _approve_cb(b, username=req["username"], a=approve_btn, d=deny_btn, rl=result_lbl):
+                a.set_sensitive(False); d.set_sensitive(False)
+                self._admin_approve(url, user, password, username, rl)
+
+            def _deny_cb(b, username=req["username"], a=approve_btn, d=deny_btn, rl=result_lbl):
+                a.set_sensitive(False); d.set_sensitive(False)
+                self._admin_deny(url, user, password, username, rl)
+
+            approve_btn.connect("clicked", _approve_cb)
+            deny_btn.connect("clicked", _deny_cb)
+            requests_box.append(card)
+
+    def _admin_approve(self, url, user, password, username, result_lbl):
+        GLib.idle_add(result_lbl.set_text, "Approving…")
+        def run():
+            try:
+                r = requests.post(
+                    _normalize_url(url) + "/api/access.php",
+                    json={"action": "approve", "username": username},
+                    auth=(user, password),
+                    timeout=10,
+                )
+                data = r.json()
+                if data.get("error"):
+                    GLib.idle_add(result_lbl.set_text, f"❌ {data['error']}")
+                elif data.get("user_set_password"):
+                    GLib.idle_add(result_lbl.set_text, "✅ Approved — they can log in with their chosen password.")
+                else:
+                    pw = data.get("password", "")
+                    GLib.idle_add(result_lbl.set_text, f"✅ Approved — password: {pw}")
+            except Exception as e:
+                GLib.idle_add(result_lbl.set_text, f"❌ {e}")
+        threading.Thread(target=run, daemon=True).start()
+
+    def _admin_deny(self, url, user, password, username, result_lbl):
+        GLib.idle_add(result_lbl.set_text, "Denying…")
+        def run():
+            try:
+                r = requests.post(
+                    _normalize_url(url) + "/api/access.php",
+                    json={"action": "deny", "username": username},
+                    auth=(user, password),
+                    timeout=10,
+                )
+                data = r.json()
+                if data.get("ok"):
+                    GLib.idle_add(result_lbl.set_text, "Denied.")
+                else:
+                    GLib.idle_add(result_lbl.set_text, f"❌ {data.get('error', 'Unknown error')}")
+            except Exception as e:
+                GLib.idle_add(result_lbl.set_text, f"❌ {e}")
         threading.Thread(target=run, daemon=True).start()
 
     def _prayer_render(self):
