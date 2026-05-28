@@ -91,6 +91,7 @@ function formatDateFull(d) {
 
 async function api(endpoint, opts={}) {
     const res = await fetch('api/' + endpoint, opts);
+    if (res.status === 401) { window.location.href = '/login.php'; return; }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
 }
@@ -469,7 +470,7 @@ function renderNews(data) {
         box.appendChild(el('span', { class: 'source-label' }, source.toUpperCase()));
         for (const [title, link] of items) {
             const btn = el('button', { class: 'news-button',
-                onclick: () => link && window.open(link, '_blank') }, '  • ' + title);
+                onclick: () => link && /^https?:\/\//i.test(link) && window.open(link, '_blank', 'noopener') }, '  • ' + title);
             box.appendChild(btn);
         }
     }

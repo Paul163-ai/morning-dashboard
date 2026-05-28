@@ -87,10 +87,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ? (json_decode(file_get_contents($requests_file), true) ?: [])
             : [];
 
-        // Check for duplicate pending request
+        // Check for duplicate pending request or existing account
         $already = array_filter($requests, fn($r) => $r['username'] === $username && $r['status'] === 'pending');
-        if ($already) {
-            $message = 'A request for that username is already pending.';
+        $taken = false;
+        if (file_exists(HTPASSWD_FILE)) {
+            foreach (file(HTPASSWD_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+                if (str_starts_with($line, $username . ':')) { $taken = true; break; }
+            }
+        }
+        if ($already || $taken) {
+            $message = 'That username is already taken.';
             $message_type = 'error';
         } else {
             $requests[] = [
