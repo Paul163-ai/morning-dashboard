@@ -121,6 +121,9 @@ function require_auth(): void {
     if ($token !== '') {
         $user = validate_remember_token($token);
         if ($user !== null) {
+            invalidate_remember_token($token);
+            $new_token = create_remember_token($user);
+            setcookie('remember_me', $new_token, ['expires' => time() + 30 * 24 * 3600, 'path' => '/', 'secure' => true, 'httponly' => true, 'samesite' => 'Lax']);
             $_SESSION['user'] = $user;
             return;
         }

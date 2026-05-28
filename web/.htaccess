@@ -1,0 +1,18 @@
+# Prevent directory listing
+Options -Indexes
+
+# Block direct access to internal PHP files
+<FilesMatch "^(helpers|config)\.php$">
+    Require all denied
+</FilesMatch>
+
+# Pass the Authorization header through to PHP so the desktop app can use Basic Auth
+RewriteEngine On
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+# Security headers
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self'; frame-ancestors 'none';"
+</IfModule>
