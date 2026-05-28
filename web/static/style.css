@@ -515,6 +515,11 @@ a { color: #5599ff; }
 #spur-comment-input::placeholder { color: var(--subtext); }
 
 @media (max-width: 640px) {
+    #header { padding-left: 12px; padding-right: 12px; }
+    .date-label  { display: none; }
+    .user-label  { display: none; }
+    .app-title   { font-size: 16px; }
+
     #label-col {
         min-width: 0 !important;
         width: 0 !important;
