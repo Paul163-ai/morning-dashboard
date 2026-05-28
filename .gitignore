@@ -6,3 +6,6 @@ __pycache__/
 *.pyc
 build-dir/
 .flatpak-builder/
+prayers_import.json
+web/data/*
+!web/data/.htaccess

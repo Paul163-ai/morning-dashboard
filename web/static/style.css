@@ -1,0 +1,1069 @@
+/* ── CSS Variables ─────────────────────────────────────────────────── */
+:root {
+    --font-size: 13px;
+
+    /* dark theme (default) */
+    --bg:             #1a1a2e;
+    --header-bg:      #16213e;
+    --header-border:  #0f3460;
+    --text:           #e0e0e0;
+    --subtext:        #a0a0c0;
+    --reading:        #d0d0e8;
+    --tab-active:     #0f3460;
+    --accent:         #e94560;
+    --btn-bg:         #0f3460;
+    --news-text:      #c0c0e0;
+    --weather-bg:     #16213e;
+    --status-col:     #6060a0;
+    --input-bg:       #0f3460;
+    --card-bg:        #0f3460;
+    --card-subtle-bg: #16213e;
+}
+
+[data-theme="light"] {
+    --bg:             #f4f4f8;
+    --header-bg:      #e8eaf2;
+    --header-border:  #c8cde0;
+    --text:           #1a1a2e;
+    --subtext:        #555570;
+    --reading:        #2a2a3e;
+    --tab-active:     #ffffff;
+    --accent:         #c0392b;
+    --btn-bg:         #dde2f0;
+    --news-text:      #333355;
+    --weather-bg:     #eef0f8;
+    --status-col:     #8888aa;
+    --input-bg:       #ffffff;
+    --card-bg:        #ffffff;
+    --card-subtle-bg: #e8eaf2;
+}
+
+/* ── Reset & Base ──────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: var(--font-size);
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+}
+
+button { cursor: pointer; font-family: inherit; font-size: inherit; }
+a { color: #5599ff; }
+
+/* ── App Shell ─────────────────────────────────────────────────────── */
+#app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+/* ── Header ────────────────────────────────────────────────────────── */
+#header {
+    display: flex;
+    align-items: center;
+    padding: 12px 20px;
+    background: var(--header-bg);
+    border-bottom: 1px solid var(--header-border);
+    gap: 12px;
+    flex-shrink: 0;
+}
+
+.app-title {
+    font-size: 20px;
+    font-weight: bold;
+    color: var(--text);
+    white-space: nowrap;
+}
+
+.date-label {
+    font-size: 12px;
+    color: var(--subtext);
+    flex: 1;
+}
+
+.user-label {
+    font-size: 12px;
+    color: var(--subtext);
+    padding: 2px 10px;
+    background: var(--btn-bg);
+    border-radius: 12px;
+    white-space: nowrap;
+}
+
+.prefs-button {
+    background: var(--btn-bg);
+    color: var(--subtext);
+    font-size: 12px;
+    border: none;
+    border-radius: 6px;
+    padding: 4px 12px;
+    transition: background 150ms ease;
+}
+.prefs-button:hover { background: var(--accent); color: #fff; }
+
+.logout-btn {
+    background: none;
+    color: var(--subtext);
+    font-size: 12px;
+    text-decoration: none;
+    border-radius: 6px;
+    padding: 4px 10px;
+    transition: color 150ms ease;
+}
+.logout-btn:hover { color: var(--accent); }
+
+/* ── Body ──────────────────────────────────────────────────────────── */
+#body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* ── Sidebar ───────────────────────────────────────────────────────── */
+#sidebar {
+    display: flex;
+    flex-direction: row;
+    background: var(--header-bg);
+    border-right: 1px solid var(--header-border);
+    flex-shrink: 0;
+}
+
+#icon-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 0;
+    min-width: 44px;
+    background: var(--header-bg);
+}
+
+#label-col {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 4px 8px 0;
+    min-width: 130px;
+    background: var(--header-bg);
+    overflow: hidden;
+    transition: min-width 200ms ease, opacity 200ms ease;
+}
+
+#label-col.hidden {
+    min-width: 0;
+    width: 0;
+    opacity: 0;
+    padding: 0;
+    pointer-events: none;
+}
+
+.sidebar-spacer { flex: 1; }
+
+/* Icon rows */
+.icon-row {
+    display: flex;
+    align-items: stretch;
+    width: 100%;
+}
+
+.sidebar-indicator {
+    width: 3px;
+    border-radius: 2px;
+    background: transparent;
+    flex-shrink: 0;
+    transition: background 150ms;
+}
+
+.sidebar-indicator-spurgeon { --ind-color: #f0a500; }
+.sidebar-indicator-news     { --ind-color: #4a9eff; }
+.sidebar-indicator-weather  { --ind-color: #00bcd4; }
+.sidebar-indicator-sermons  { --ind-color: #66bb6a; }
+.sidebar-indicator-bible    { --ind-color: #ffd54f; }
+.sidebar-indicator-prayer   { --ind-color: #ef5350; }
+.sidebar-indicator-notes    { --ind-color: #ff7043; }
+
+.icon-row.active .sidebar-indicator { background: var(--ind-color); }
+
+.sidebar-icon-btn {
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    padding: 0 8px;
+    font-size: 18px;
+    color: var(--subtext);
+    min-width: 36px;
+    height: 40px;
+    margin: 2px 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 150ms ease;
+}
+.sidebar-icon-btn:hover        { background: var(--tab-active); }
+.icon-row.active .sidebar-icon-btn { background: var(--tab-active); color: var(--text); }
+
+.sidebar-label-btn {
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    padding: 0 12px;
+    font-size: calc(var(--font-size) - 1px);
+    font-weight: bold;
+    color: var(--subtext);
+    margin: 2px 0;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    text-align: left;
+    white-space: nowrap;
+    transition: background 150ms ease;
+    width: 100%;
+}
+.sidebar-label-btn:hover        { background: var(--tab-active); color: var(--text); }
+.sidebar-label-btn.active       { background: var(--tab-active); color: var(--text); }
+
+.sidebar-collapse-btn {
+    background: transparent;
+    color: var(--subtext);
+    border: none;
+    border-radius: 8px;
+    margin: 4px;
+    padding: 6px 8px;
+    font-size: 11px;
+    transition: background 150ms ease;
+}
+.sidebar-collapse-btn:hover { background: var(--tab-active); color: var(--text); }
+
+/* ── Content area ──────────────────────────────────────────────────── */
+#content {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+}
+
+.tab-panel {
+    display: none;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+.tab-panel.active { display: flex; flex-direction: column; }
+
+.tab-content {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+/* ── Shared Components ─────────────────────────────────────────────── */
+.card {
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 8px;
+}
+
+.card-subtle {
+    background: var(--card-subtle-bg);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 6px;
+}
+
+.section-title {
+    font-size: 16px;
+    font-weight: bold;
+    color: var(--accent);
+    margin-bottom: 10px;
+}
+
+.source-label {
+    font-size: calc(var(--font-size) - 2px);
+    font-weight: bold;
+    color: var(--accent);
+    padding: 10px 0 4px 0;
+    display: block;
+}
+
+.status-label {
+    color: var(--status-col);
+    font-style: italic;
+    font-size: calc(var(--font-size) - 1px);
+    padding: 20px;
+}
+
+.reading-text {
+    font-size: var(--font-size);
+    color: var(--reading);
+    line-height: 1.8;
+    white-space: pre-wrap;
+}
+
+.sermon-btn {
+    background: var(--btn-bg);
+    color: var(--text);
+    font-size: 12px;
+    border: none;
+    border-radius: 6px;
+    padding: 4px 12px;
+    margin-left: 4px;
+    transition: background 150ms ease;
+}
+.sermon-btn:hover { background: var(--accent); color: #fff; }
+.sermon-btn:disabled { opacity: 0.5; cursor: default; }
+
+.sermon-toolbar {
+    background: var(--header-bg);
+    padding: 8px 12px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+/* ── Spurgeon Tab ──────────────────────────────────────────────────── */
+.spurgeon-paned {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    gap: 0;
+}
+
+.spurgeon-left {
+    flex: 2;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 16px;
+}
+
+.spurgeon-divider {
+    width: 4px;
+    background: var(--header-border);
+    cursor: col-resize;
+    flex-shrink: 0;
+}
+
+.spurgeon-right {
+    flex: 1;
+    min-width: 220px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 16px;
+    border-left: 1px solid var(--header-border);
+}
+
+.spurgeon-reading-scroll {
+    flex: 1;
+    overflow-y: auto;
+    margin-top: 8px;
+}
+
+#spurgeon-reading {
+    font-size: var(--font-size);
+    color: var(--reading);
+    line-height: 1.8;
+}
+
+#spurgeon-reading .section-heading {
+    font-weight: bold;
+    font-size: calc(var(--font-size) + 2px);
+    color: var(--text);
+    display: block;
+    margin-bottom: 6px;
+}
+
+#spurgeon-reading .verse-ref {
+    font-weight: bold;
+    color: #5599ff;
+    cursor: pointer;
+    text-decoration: underline;
+}
+#spurgeon-reading .verse-ref:hover { color: #88bbff; }
+
+#spurgeon-reading .date-line {
+    font-weight: bold;
+    display: block;
+    margin-bottom: 6px;
+}
+
+#spurgeon-reading .divider {
+    border: none;
+    border-top: 1px solid var(--header-border);
+    margin: 16px 0;
+}
+
+.spurgeon-notes-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
+    gap: 8px;
+}
+
+.spurgeon-notes-header .section-title {
+    flex: 1;
+    margin-bottom: 0;
+    font-size: calc(var(--font-size) + 1px);
+}
+
+#spurgeon-notes {
+    height: 140px;
+    flex-shrink: 0;
+    background: var(--input-bg);
+    color: var(--text);
+    border: none;
+    border-radius: 6px;
+    padding: 10px;
+    font-size: var(--font-size);
+    font-family: inherit;
+    resize: none;
+    line-height: 1.7;
+    outline: none;
+    caret-color: #f0a500;
+}
+#spurgeon-notes::placeholder { color: var(--subtext); }
+
+.spur-comments-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    border-top: 1px solid var(--header-border);
+    padding-top: 10px;
+    margin-top: 10px;
+}
+
+.spur-comments-list {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.spur-comment {
+    background: var(--card-bg);
+    border-radius: 6px;
+    padding: 8px 10px;
+}
+
+.spur-comment-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
+.spur-comment-user {
+    font-weight: bold;
+    color: #f0a500;
+    flex-shrink: 0;
+}
+
+.spur-comment-ts {
+    font-size: calc(var(--font-size) - 1px);
+    color: var(--subtext);
+    flex: 1;
+}
+
+.spur-comment-del {
+    background: none;
+    border: none;
+    color: var(--subtext);
+    padding: 0 2px;
+    line-height: 1;
+    font-size: calc(var(--font-size) - 1px);
+    flex-shrink: 0;
+}
+.spur-comment-del:hover { color: #ef5350; }
+
+.spur-comment-body {
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.5;
+}
+
+.spur-comment-form {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+    flex-shrink: 0;
+}
+
+#spur-comment-input {
+    flex: 1;
+    height: 58px;
+    background: var(--input-bg);
+    color: var(--text);
+    border: none;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: var(--font-size);
+    font-family: inherit;
+    resize: none;
+    outline: none;
+    caret-color: #f0a500;
+    line-height: 1.5;
+}
+#spur-comment-input::placeholder { color: var(--subtext); }
+
+@media (max-width: 640px) {
+    #label-col {
+        min-width: 0 !important;
+        width: 0 !important;
+        opacity: 0 !important;
+        padding: 0 !important;
+        pointer-events: none !important;
+    }
+    .sidebar-collapse-btn { display: none; }
+
+    /* Ensure content at the bottom of every tab clears Android's browser chrome */
+    .tab-content {
+        padding-bottom: max(80px, env(safe-area-inset-bottom, 80px));
+    }
+
+    /* Spurgeon: let the tab scroll as a single page so all panels are reachable */
+    #tab-spurgeon {
+        overflow-y: auto;
+    }
+    .spurgeon-paned {
+        flex-direction: column;
+        overflow: visible;
+        flex: none;   /* natural height, not flex-stretch — makes panel taller than viewport */
+    }
+    .spurgeon-divider {
+        display: none;
+    }
+    .spurgeon-left {
+        flex: none;
+        overflow: visible;
+        min-height: 0;
+    }
+    /* Reading gets a bounded scrollable area so it doesn't push everything else off-screen */
+    .spurgeon-reading-scroll {
+        flex: none;
+        max-height: 45vh;
+        overflow-y: auto;
+    }
+    .spurgeon-right {
+        flex: none;
+        min-width: 0;
+        min-height: 0;
+        overflow: visible;
+        border-left: none;
+        border-top: 1px solid var(--header-border);
+        /* Extra bottom padding so the comment form clears Android's browser chrome */
+        padding-bottom: max(80px, env(safe-area-inset-bottom, 80px));
+    }
+    /* Let comments section and list show at full natural height */
+    .spur-comments-section {
+        flex: none;
+        overflow: visible;
+    }
+    .spur-comments-list {
+        flex: none;
+        overflow: visible;
+        max-height: none;
+    }
+}
+
+/* ── News Tab ──────────────────────────────────────────────────────── */
+.news-button {
+    background: transparent;
+    color: var(--news-text);
+    font-size: calc(var(--font-size) - 1px);
+    padding: 6px 10px;
+    border: none;
+    border-radius: 4px;
+    text-align: left;
+    width: 100%;
+    transition: background 150ms ease;
+    cursor: pointer;
+}
+.news-button:hover { background: var(--tab-active); color: var(--text); }
+
+/* ── Weather Tab ───────────────────────────────────────────────────── */
+.weather-current {
+    background: var(--weather-bg);
+    border-radius: 12px;
+    padding: 20px;
+    margin: 10px auto;
+    text-align: center;
+    max-width: 300px;
+}
+
+.weather-icon { font-size: 72px; line-height: 1; }
+.weather-temp { font-size: 48px; font-weight: bold; color: var(--text); }
+.weather-desc { font-size: 14px; color: var(--subtext); margin-top: 4px; }
+
+.forecast-grid {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+
+.forecast-card {
+    background: var(--weather-bg);
+    border-radius: 12px;
+    padding: 12px 8px;
+    flex: 1;
+    min-width: 70px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.forecast-day  { font-size: calc(var(--font-size) - 1px); color: var(--subtext); font-weight: bold; }
+.forecast-icon { font-size: 28px; }
+.forecast-hi   { font-size: var(--font-size); color: #e94560; font-weight: bold; }
+.forecast-lo   { font-size: calc(var(--font-size) - 1px); color: var(--subtext); }
+
+/* ── Bible Tab ─────────────────────────────────────────────────────── */
+.bible-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.bible-select {
+    background: var(--input-bg);
+    color: var(--text);
+    border: 1px solid var(--header-border);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: calc(var(--font-size) - 1px);
+    font-family: inherit;
+}
+
+.bible-chapter-input {
+    background: var(--input-bg);
+    color: var(--text);
+    border: 1px solid var(--header-border);
+    border-radius: 6px;
+    padding: 4px 8px;
+    width: 60px;
+    font-size: calc(var(--font-size) - 1px);
+    font-family: inherit;
+}
+
+#bible-text {
+    font-size: var(--font-size);
+    color: var(--reading);
+    line-height: 1.9;
+}
+
+.verse-num {
+    font-size: calc(var(--font-size) - 2px);
+    color: var(--accent);
+    font-weight: bold;
+    vertical-align: super;
+    margin-right: 2px;
+}
+
+.bible-paragraph { margin-bottom: 12px; }
+
+.bible-citation {
+    font-size: calc(var(--font-size) - 3px);
+    color: var(--subtext);
+    font-style: italic;
+    margin-top: 16px;
+    display: block;
+}
+
+.mcheyne-readings {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.mcheyne-btn {
+    background: var(--btn-bg);
+    color: var(--subtext);
+    border: none;
+    border-radius: 6px;
+    padding: 3px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 150ms;
+}
+.mcheyne-btn:hover { background: var(--accent); color: #fff; }
+
+/* ── Prayer Tab ────────────────────────────────────────────────────── */
+.prayer-toolbar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+
+.prayer-add-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.prayer-input {
+    flex: 1;
+    background: var(--input-bg);
+    color: var(--text);
+    border: 1px solid var(--header-border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: var(--font-size);
+    font-family: inherit;
+}
+
+.prayer-list { display: flex; flex-direction: column; gap: 4px; }
+
+.prayer-item {
+    background: var(--card-bg);
+    border-radius: 6px;
+    padding: 6px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--font-size);
+}
+.prayer-item:hover { background: var(--header-border); }
+.prayer-item.done .prayer-text {
+    color: var(--subtext);
+    text-decoration: line-through;
+}
+
+.prayer-item input[type=checkbox] { cursor: pointer; flex-shrink: 0; }
+.prayer-text { flex: 1; }
+.prayer-move-btn {
+    background: transparent;
+    border: none;
+    color: var(--subtext);
+    padding: 0 4px;
+    font-size: 14px;
+    cursor: pointer;
+    line-height: 1;
+}
+.prayer-move-btn:hover { color: var(--text); }
+
+.done-divider {
+    font-size: 11px;
+    color: var(--subtext);
+    padding: 8px 0 4px;
+    border-top: 1px solid var(--header-border);
+    margin-top: 4px;
+}
+
+.prayer-item-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.prayer-sublist {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-left: 28px;
+}
+
+.prayer-subitem {
+    background: var(--card-subtle-bg);
+    border-radius: 6px;
+    padding: 4px 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: calc(var(--font-size) - 1px);
+}
+.prayer-subitem:hover { background: var(--header-border); }
+.prayer-subitem.done .prayer-text {
+    color: var(--subtext);
+    text-decoration: line-through;
+}
+
+.prayer-sub-add-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-left: 28px;
+    margin-top: 2px;
+}
+
+.prayer-sub-input {
+    flex: 1;
+    background: var(--input-bg);
+    color: var(--text);
+    border: 1px solid var(--header-border);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: calc(var(--font-size) - 1px);
+    font-family: inherit;
+}
+
+/* ── Notes Tab ─────────────────────────────────────────────────────── */
+#notes-area {
+    width: 100%;
+    flex: 1;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--header-border);
+    border-radius: 8px;
+    padding: 12px;
+    font-size: var(--font-size);
+    font-family: inherit;
+    line-height: 1.7;
+    resize: none;
+    outline: none;
+    caret-color: #f0a500;
+}
+
+.notes-status {
+    font-size: 11px;
+    color: var(--status-col);
+    font-style: italic;
+    padding: 4px 0;
+    height: 20px;
+}
+
+/* ── Sermons Tab ───────────────────────────────────────────────────── */
+.sermons-paned {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+.sermons-left {
+    width: 200px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 8px 16px 16px;
+    border-right: 1px solid var(--header-border);
+    overflow: hidden;
+}
+
+.sermons-list-scroll {
+    flex: 1;
+    overflow-y: auto;
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.sermon-list-item {
+    background: var(--card-bg);
+    border: none;
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: var(--text);
+    font-size: var(--font-size);
+    text-align: left;
+    cursor: pointer;
+    transition: background 150ms;
+    width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.sermon-list-item:hover    { background: var(--accent); color: #fff; }
+.sermon-list-item.selected { background: var(--tab-active); }
+
+.sermons-right {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 16px;
+}
+
+.sermon-title-entry {
+    flex: 1;
+    background: var(--input-bg);
+    color: var(--text);
+    border: 1px solid var(--header-border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: var(--font-size);
+    font-family: inherit;
+}
+
+.sermon-text-area {
+    flex: 1;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--header-border);
+    border-radius: 8px;
+    padding: 12px;
+    font-size: var(--font-size);
+    font-family: inherit;
+    line-height: 1.7;
+    resize: none;
+    outline: none;
+}
+
+.sync-status {
+    font-size: 11px;
+    color: var(--status-col);
+    font-style: italic;
+    padding: 4px 0;
+    height: 20px;
+}
+
+/* ── Settings Modal ────────────────────────────────────────────────── */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.modal-overlay[hidden] { display: none; }
+
+.modal-box {
+    background: var(--bg);
+    border: 1px solid var(--header-border);
+    border-radius: 12px;
+    width: 480px;
+    max-width: 95vw;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--header-border);
+}
+.modal-header h2 { flex: 1; font-size: 16px; }
+
+.modal-close-btn {
+    background: transparent;
+    border: none;
+    color: var(--subtext);
+    font-size: 18px;
+    cursor: pointer;
+    padding: 0 4px;
+}
+.modal-close-btn:hover { color: var(--text); }
+
+.modal-body {
+    overflow-y: auto;
+    padding: 20px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 20px;
+    border-top: 1px solid var(--header-border);
+}
+
+.save-btn {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 20px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: opacity 150ms;
+}
+.save-btn:hover { opacity: 0.85; }
+
+.cancel-btn {
+    background: var(--btn-bg);
+    color: var(--text);
+    border: none;
+    border-radius: 6px;
+    padding: 6px 16px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+/* Settings sections */
+.settings-section-label {
+    font-size: 11px;
+    font-weight: bold;
+    color: var(--accent);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--header-border);
+}
+
+.settings-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: var(--font-size);
+}
+.settings-row label { flex: 1; color: var(--text); }
+
+.settings-input {
+    background: var(--input-bg);
+    color: var(--text);
+    border: 1px solid var(--header-border);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: var(--font-size);
+    font-family: inherit;
+}
+
+.settings-tab-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0;
+}
+.settings-tab-row label { flex: 1; }
+
+.loc-results {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.loc-result-btn {
+    background: var(--card-bg);
+    color: var(--text);
+    border: none;
+    border-radius: 6px;
+    padding: 5px 10px;
+    text-align: left;
+    cursor: pointer;
+    font-size: calc(var(--font-size) - 1px);
+    transition: background 150ms;
+}
+.loc-result-btn:hover { background: var(--accent); color: #fff; }
+
+/* ── Scrollbars ────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--header-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--subtext); }
+
+/* ── Utility ───────────────────────────────────────────────────────── */
+.hidden { display: none !important; }
+.flex-row { display: flex; align-items: center; gap: 8px; }
+.flex-1 { flex: 1; }
