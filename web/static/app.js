@@ -90,7 +90,8 @@ function formatDateFull(d) {
 }
 
 async function api(endpoint, opts={}) {
-    const res = await fetch('api/' + endpoint, opts);
+    const headers = {'X-Requested-With': 'XMLHttpRequest', ...(opts.headers||{})};
+    const res = await fetch('api/' + endpoint, {...opts, headers});
     if (res.status === 401) { window.location.href = '/login.php'; return; }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
@@ -130,6 +131,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Collapse button
     document.getElementById('collapse-btn').addEventListener('click', toggleSidebar);
+
+    // Logout button
+    document.getElementById('logout-btn').addEventListener('click', () => {
+        api('logout.php', {method: 'POST'}).then(() => { location.href = '/login.php'; });
+    });
 
     // Switch to first visible tab
     const firstTab = prefs.tab_order.find(k => prefs.visible_tabs.includes(k));

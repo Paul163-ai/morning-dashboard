@@ -157,6 +157,21 @@ function require_auth(): void {
 
 require_auth();
 
+// CSRF: for session-authenticated POST/DELETE/PUT requests, require the custom header.
+// Basic Auth requests from the desktop app ($_MD_AUTH_USER !== null) are exempt.
+// Unauthenticated public pages (login.php, request.php) have no session, so also exempt.
+if ($_MD_AUTH_USER === null && !empty($_SESSION['user'])) {
+    $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+    if (in_array($method, ['POST', 'DELETE', 'PUT', 'PATCH'])) {
+        if (strtolower($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') !== 'xmlhttprequest') {
+            if (!headers_sent()) header('Content-Type: application/json; charset=utf-8');
+            http_response_code(403);
+            echo json_encode(['error' => 'CSRF check failed']);
+            exit;
+        }
+    }
+}
+
 // --- APR1-MD5 (accepts optional $salt for hash verification) ---
 
 function apr1_md5(string $password, string $salt = ''): string {

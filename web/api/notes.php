@@ -6,7 +6,7 @@ $file = user_data_dir() . '/notes.txt';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $body = json_decode(file_get_contents('php://input'), true);
-    $text = $body['text'] ?? '';
+    $text = substr($body['text'] ?? '', 0, 100000);
     file_put_contents($file, $text, LOCK_EX);
     echo json_encode(['ok' => true]);
 } else {
