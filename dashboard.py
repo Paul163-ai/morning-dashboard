@@ -573,13 +573,9 @@ class MorningDashboard(Gtk.ApplicationWindow):
         # Restore window size
         win_w = self.prefs.get("window_width", 900)
         win_h = self.prefs.get("window_height", 650)
-        self._saved_w = win_w
-        self._saved_h = win_h
         self.set_default_size(win_w, win_h)
 
         self.connect("close-request", self._on_close_request)
-        self.connect("notify::default-width", self._on_window_resize)
-        self.connect("notify::default-height", self._on_window_resize)
 
         # Dynamic CSS provider (rebuilt when settings change)
         self.css_provider = Gtk.CssProvider()
@@ -803,13 +799,6 @@ class MorningDashboard(Gtk.ApplicationWindow):
                     self._switch_tab(key)
                     break
 
-    def _on_window_resize(self, *args):
-        w = self.get_property("default-width")
-        h = self.get_property("default-height")
-        if w > 0 and h > 0:
-            self._saved_w = w
-            self._saved_h = h
-
     def _on_close_request(self, *args):
         if hasattr(self, "_notes_save_id") and self._notes_save_id is not None:
             GLib.source_remove(self._notes_save_id)
@@ -818,8 +807,10 @@ class MorningDashboard(Gtk.ApplicationWindow):
             GLib.source_remove(self._spurgeon_notes_save_id)
             self._spurgeon_notes_save()
 
-        self.prefs["window_width"] = self._saved_w
-        self.prefs["window_height"] = self._saved_h
+        w, h = self.get_width(), self.get_height()
+        if w > 0 and h > 0:
+            self.prefs["window_width"] = w
+            self.prefs["window_height"] = h
         save_prefs(self.prefs)
         return False
 
