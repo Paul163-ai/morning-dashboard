@@ -441,8 +441,7 @@ NEWS_SOURCES = {
     "BBC News":    "https://feeds.bbci.co.uk/news/rss.xml",
     "Google News": "https://news.google.com/rss",
     "Open Doors":  "https://www.opendoorsuk.org/feed/",
-    "Christianity Today": "https://www.christianitytoday.com/feed/",
-    "TED Talks":   "https://feeds.acast.com/public/shows/67587e77c705e441797aff96",
+    "Gospel Coalition": "https://www.thegospelcoalition.org/feed/",
     "AI News":     "https://feeds.feedburner.com/TheHackersNews",
     "Tech News":   "https://feeds.bbci.co.uk/news/technology/rss.xml",
 }
