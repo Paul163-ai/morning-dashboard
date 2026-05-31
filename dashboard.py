@@ -437,14 +437,15 @@ def _normalize_url(url: str) -> str:
 
 # ── News helper ───────────────────────────────────────────────────────────────
 
-NEWS_SOURCES = {
-    "BBC News":    "https://feeds.bbci.co.uk/news/rss.xml",
-    "Google News": "https://news.google.com/rss",
-    "Open Doors":  "https://www.opendoorsuk.org/feed/",
-    "Gospel Coalition": "https://www.thegospelcoalition.org/feed/",
-    "AI News":     "https://feeds.feedburner.com/TheHackersNews",
-    "Tech News":   "https://feeds.bbci.co.uk/news/technology/rss.xml",
-}
+# (name, url, proxy)  proxy=True: fetched via rss2json.com (Cloudflare bypass)
+NEWS_SOURCES = [
+    ("BBC News",         "https://feeds.bbci.co.uk/news/rss.xml",           False),
+    ("Google News",      "https://news.google.com/rss",                      False),
+    ("Open Doors",       "https://www.opendoorsuk.org/feed/",                False),
+    ("Gospel Coalition", "https://www.thegospelcoalition.org/feed/",         True),
+    ("AI News",          "https://feeds.feedburner.com/TheHackersNews",      False),
+    ("Tech News",        "https://feeds.bbci.co.uk/news/technology/rss.xml", False),
+]
 
 def fetch_news(url):
     try:
@@ -462,6 +463,21 @@ def fetch_news(url):
                 l = link.group(1).strip() if link else ""
                 results.append((t, l))
         return results
+    except Exception as e:
+        return [(f"Error: {e}", "")]
+
+def fetch_news_proxied(url):
+    try:
+        api = "https://api.rss2json.com/v1/api.json?rss_url=" + requests.utils.quote(url)
+        r = requests.get(api, timeout=10, headers={"User-Agent": "MorningDashboard/1.0"})
+        data = r.json()
+        results = []
+        for item in data.get("items", [])[:10]:
+            t = item.get("title", "").strip()
+            l = item.get("link", "")
+            if t:
+                results.append((t, l))
+        return results or [("No items found", "")]
     except Exception as e:
         return [(f"Error: {e}", "")]
 
@@ -2610,8 +2626,8 @@ X-GNOME-Autostart-enabled=true
 
     def _load_news(self):
         all_items = {}
-        for source, url in NEWS_SOURCES.items():
-            all_items[source] = fetch_news(url)
+        for source, url, proxy in NEWS_SOURCES:
+            all_items[source] = fetch_news_proxied(url) if proxy else fetch_news(url)
         GLib.idle_add(self._set_news, all_items)
 
     def _set_news(self, all_items):
