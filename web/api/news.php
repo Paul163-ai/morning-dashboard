@@ -2,13 +2,14 @@
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../helpers.php';
 
+// proxy=true: fetched via rss2json.com (for feeds behind Cloudflare)
 $SOURCES = [
-    'BBC News'    => 'https://feeds.bbci.co.uk/news/rss.xml',
-    'Google News' => 'https://news.google.com/rss',
-    'Open Doors'  => 'https://www.opendoorsuk.org/feed/',
-    'Gospel Coalition' => 'https://www.thegospelcoalition.org/feed/',
-    'AI News'     => 'https://feeds.feedburner.com/TheHackersNews',
-    'Tech News'   => 'https://feeds.bbci.co.uk/news/technology/rss.xml',
+    'BBC News'         => ['url' => 'https://feeds.bbci.co.uk/news/rss.xml',               'proxy' => false],
+    'Google News'      => ['url' => 'https://news.google.com/rss',                          'proxy' => false],
+    'Open Doors'       => ['url' => 'https://www.opendoorsuk.org/feed/',                    'proxy' => false],
+    'Gospel Coalition' => ['url' => 'https://www.thegospelcoalition.org/feed/',             'proxy' => true],
+    'AI News'          => ['url' => 'https://feeds.feedburner.com/TheHackersNews',           'proxy' => false],
+    'Tech News'        => ['url' => 'https://feeds.bbci.co.uk/news/technology/rss.xml',     'proxy' => false],
 ];
 
 function fetch_rss(string $url): array {
@@ -41,9 +42,37 @@ function fetch_rss(string $url): array {
     return $items ?: [['No items found', '']];
 }
 
+function fetch_rss_proxied(string $url): array {
+    $api = 'https://api.rss2json.com/v1/api.json?rss_url=' . urlencode($url);
+    $ch = curl_init($api);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 10,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_USERAGENT      => 'MorningDashboard/2.0',
+        CURLOPT_SSL_VERIFYPEER => true,
+    ]);
+    $json = curl_exec($ch);
+    curl_close($ch);
+    if (!$json) return [['Could not load feed', '']];
+
+    $data = json_decode($json, true);
+    if (!isset($data['items'])) return [['No items found', '']];
+
+    $items = [];
+    foreach (array_slice($data['items'], 0, 10) as $item) {
+        $title = strip_tags(trim($item['title'] ?? ''));
+        $link  = $item['link'] ?? '';
+        if ($title) $items[] = [$title, $link];
+    }
+    return $items ?: [['No items found', '']];
+}
+
 $result = [];
-foreach ($SOURCES as $name => $url) {
-    $result[$name] = fetch_rss($url);
+foreach ($SOURCES as $name => $source) {
+    $result[$name] = $source['proxy']
+        ? fetch_rss_proxied($source['url'])
+        : fetch_rss($source['url']);
 }
 
 echo json_encode(['sources' => $result], JSON_UNESCAPED_UNICODE);
