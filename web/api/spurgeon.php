@@ -2,6 +2,11 @@
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../helpers.php';
 
+// Release the session lock before the slow scrape below — otherwise every
+// other API request from this session (notes, comments, prefs...) blocks
+// until this one finishes, which can make the whole tab appear to hang.
+session_write_close();
+
 $date_str = $_GET['date'] ?? date('Y-m-d');
 try { $date = new DateTime($date_str); } catch (Exception $e) { $date = new DateTime(); }
 

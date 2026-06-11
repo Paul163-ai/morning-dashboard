@@ -89,9 +89,19 @@ function formatDateFull(d) {
     return d.toLocaleDateString('en-GB', { weekday:'long', day:'2-digit', month:'long', year:'numeric' });
 }
 
-async function api(endpoint, opts={}) {
+async function api(endpoint, opts={}, timeoutMs=20000) {
     const headers = {'X-Requested-With': 'XMLHttpRequest', ...(opts.headers||{})};
-    const res = await fetch('api/' + endpoint, {...opts, headers});
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let res;
+    try {
+        res = await fetch('api/' + endpoint, {...opts, headers, signal: controller.signal});
+    } catch (e) {
+        if (e.name === 'AbortError') throw new Error('Request timed out');
+        throw e;
+    } finally {
+        clearTimeout(timer);
+    }
     if (res.status === 401) { window.location.href = '/login.php'; return; }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
