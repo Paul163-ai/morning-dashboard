@@ -69,6 +69,16 @@ function invalidate_remember_token(string $token): void {
     }
 }
 
+// --- Login log ---
+
+function log_login_event(string $user, string $ip, string $method, bool $ok): void {
+    $file    = __DIR__ . '/data/login_log.json';
+    $entries = file_exists($file) ? (json_decode(file_get_contents($file), true) ?: []) : [];
+    array_unshift($entries, ['ts' => time(), 'user' => $user, 'ip' => $ip, 'method' => $method, 'ok' => $ok]);
+    if (count($entries) > 200) $entries = array_slice($entries, 0, 200);
+    file_put_contents($file, json_encode($entries), LOCK_EX);
+}
+
 // --- Auth ---
 
 function verify_htpasswd(string $username, string $password): bool {
@@ -125,6 +135,7 @@ function require_auth(): void {
             $new_token = create_remember_token($user);
             setcookie('remember_me', $new_token, ['expires' => time() + 30 * 24 * 3600, 'path' => '/', 'secure' => true, 'httponly' => true, 'samesite' => 'Lax']);
             $_SESSION['user'] = $user;
+            log_login_event($user, $_SERVER['REMOTE_ADDR'] ?? 'unknown', 'remember', true);
             return;
         }
         // Expired/invalid — clear it

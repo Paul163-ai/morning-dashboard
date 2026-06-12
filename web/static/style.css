@@ -312,6 +312,7 @@ a { color: #5599ff; }
 }
 .sermon-btn:hover { background: var(--accent); color: #fff; }
 .sermon-btn:disabled { opacity: 0.5; cursor: default; }
+.sermon-btn.active { background: var(--accent); color: #fff; }
 
 .sermon-toolbar {
     background: var(--header-bg);

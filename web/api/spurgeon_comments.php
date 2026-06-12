@@ -26,7 +26,7 @@ if ($method === 'GET') {
 } elseif ($method === 'POST') {
     $body = json_decode(file_get_contents('php://input'), true);
     $date = preg_replace('/[^0-9\-]/', '', $body['date'] ?? date('Y-m-d'));
-    $text = substr(trim($body['text'] ?? ''), 0, 2000);
+    $text = substr(trim($body['text'] ?? ''), 0, 8000);
     if ($text === '') { http_response_code(400); echo json_encode(['error' => 'empty']); exit; }
 
     $data = load_comments($comments_file);

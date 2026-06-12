@@ -426,6 +426,108 @@ def fetch_spurgeon(date=None):
 
     return "\n\n─────────────────────────────────\n\n".join(results)
 
+# ── Spurgeon modernisation (Claude API) ───────────────────────────────────────
+
+def split_spurgeon_sections(combined):
+    """Split fetch_spurgeon()'s combined text into (am_text, pm_text), stripping headings."""
+    parts = combined.split("\n\n─────────────────────────────────\n\n")
+    sections = []
+    for part in parts:
+        lines = part.split("\n", 1)
+        sections.append(lines[1].strip() if len(lines) > 1 else "")
+    while len(sections) < 2:
+        sections.append("")
+    return sections[0], sections[1]
+
+def extract_spurgeon_verse(body):
+    """Split a Spurgeon reading body into (quote, reference, reflection).
+
+    Most readings open with '"<verse text>" <Reference>. <reflection>'.
+    If that pattern isn't found, returns ("", "", body) unchanged.
+    """
+    import re
+    body = re.sub(
+        r'^(Meditation for.*?Spurgeon\s*)', '', body,
+        flags=re.DOTALL | re.IGNORECASE
+    ).strip()
+    ref_m = re.match(
+        r'^"([^"]+)"\s+'
+        r'((?:\d+\s+)?[A-Z][a-z]+(?:\s+(?:of|the)\s+[A-Z][a-z]+)?'
+        r'\s+\d+:\d+[-\d–]*)'
+        r'\.\s*(.*)',
+        body, re.DOTALL
+    )
+    if ref_m:
+        return ref_m.group(1).strip(), ref_m.group(2).strip(), ref_m.group(3).strip()
+    return "", "", body
+
+def build_modernise_prompt(am_reflection, pm_reflection):
+    """Build the prompt asking Claude to modernise the two Spurgeon reflections."""
+    return (
+        "Rewrite the following two devotional reflections by Charles Spurgeon "
+        "in clear, modern English. Preserve the meaning and tone. Do not add "
+        "titles, headings, commentary, Bible quotations or markdown formatting "
+        "— return plain prose only.\n\n"
+        "Reply in exactly this format, with no other text:\n"
+        "===AM===\n<modernised morning reflection>\n"
+        "===PM===\n<modernised evening reflection>\n\n"
+        f"=== MORNING REFLECTION ===\n{am_reflection}\n\n"
+        f"=== EVENING REFLECTION ===\n{pm_reflection}"
+    )
+
+def parse_modernise_reply(reply):
+    """Parse a Claude reply in ===AM===/===PM=== format. Returns (am_modern, pm_modern)."""
+    import re
+    am_match = re.search(r'===AM===\s*(.*?)\s*(?:===PM===|\Z)', reply, re.DOTALL)
+    pm_match = re.search(r'===PM===\s*(.*)', reply, re.DOTALL)
+    am_modern = am_match.group(1).strip() if am_match else ""
+    pm_modern = pm_match.group(1).strip() if pm_match else ""
+    return am_modern, pm_modern
+
+def combine_spurgeon_modern(quote, ref, modern):
+    """Reassemble a modernised reflection with its verbatim verse + reference."""
+    if quote and ref:
+        return f'"{quote}" {ref}.\n\n{modern}'
+    return modern
+
+def modernize_spurgeon(am_text, pm_text, api_key):
+    """Rewrite the AM/PM Spurgeon readings in modern English using the Claude API.
+
+    Returns a dict {"am": ..., "pm": ...} where each value is
+    '"<verse>" <Reference>.\\n\\n<modernised reflection>' (verse/reference kept
+    verbatim from the original; only the reflection is rewritten). Raises on error.
+    """
+    am_quote, am_ref, am_reflection = extract_spurgeon_verse(am_text)
+    pm_quote, pm_ref, pm_reflection = extract_spurgeon_verse(pm_text)
+
+    prompt = build_modernise_prompt(am_reflection, pm_reflection)
+
+    r = requests.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        json={
+            "model": "claude-sonnet-4-5",
+            "max_tokens": 2000,
+            "messages": [{"role": "user", "content": prompt}],
+        },
+        timeout=60,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"Claude API error (HTTP {r.status_code}): {r.text[:300]}")
+
+    data = r.json()
+    reply = "".join(b.get("text", "") for b in data.get("content", []))
+    am_modern, pm_modern = parse_modernise_reply(reply)
+
+    return {
+        "am": combine_spurgeon_modern(am_quote, am_ref, am_modern),
+        "pm": combine_spurgeon_modern(pm_quote, pm_ref, pm_modern),
+    }
+
 # ── Web URL helper ────────────────────────────────────────────────────────────
 
 def _normalize_url(url: str) -> str:
@@ -485,6 +587,7 @@ def fetch_news_proxied(url):
 
 PREFS_FILE     = os.path.expanduser("~/.config/morning-dashboard/prefs.json")
 AUTOSTART_FILE = os.path.expanduser("~/.config/autostart/morning-dashboard.desktop")
+SPURGEON_CACHE_FILE = os.path.expanduser("~/.config/morning-dashboard/spurgeon_cache.json")
 
 ALL_TABS = ["spurgeon", "news", "weather", "sermons", "calendar", "bible", "prayer", "notes"]
 
@@ -502,6 +605,18 @@ def save_prefs(prefs):
     os.makedirs(os.path.dirname(PREFS_FILE), exist_ok=True)
     with open(PREFS_FILE, "w") as f:
         json.dump(prefs, f)
+
+def load_spurgeon_cache():
+    try:
+        with open(SPURGEON_CACHE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_spurgeon_cache(cache):
+    os.makedirs(os.path.dirname(SPURGEON_CACHE_FILE), exist_ok=True)
+    with open(SPURGEON_CACHE_FILE, "w") as f:
+        json.dump(cache, f, ensure_ascii=False, indent=2)
 
 # ── Custom TextView with theme-coloured cursor ────────────────────────────────
 # GTK4/libadwaita ignores CSS cursor-colour overrides when the system colour
@@ -581,6 +696,8 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self.visible_tabs = self.prefs.get("visible_tabs", ALL_TABS[:])
         self.tab_order = self.prefs.get("tab_order", ALL_TABS[:])
         self.api_bible_key = self.prefs.get("api_bible_key", "")
+        self.claude_api_key = self.prefs.get("claude_api_key", "")
+        self.spurgeon_paned_position = self.prefs.get("spurgeon_paned_position", 700)
         self.web_url  = self.prefs.get("web_url", "")
         self.web_user = self.prefs.get("web_user", "")
         self.web_pass = self.prefs.get("web_pass", "")
@@ -1572,6 +1689,41 @@ class MorningDashboard(Gtk.ApplicationWindow):
         bible_key_row.append(show_key_btn)
         box.append(bible_key_row)
 
+        # ── Claude API key (Spurgeon modernisation) ────────────────────────────
+        claude_header = Gtk.Label(label="DEVOTIONAL — MODERN ENGLISH (CLAUDE API)")
+        claude_header.add_css_class("source-label")
+        claude_header.set_halign(Gtk.Align.START)
+        box.append(claude_header)
+
+        claude_row0 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        claude_pre = Gtk.Label(label="API key from")
+        claude_pre.add_css_class("date-label")
+        claude_link = Gtk.LinkButton.new_with_label("https://console.anthropic.com", "console.anthropic.com")
+        claude_link.add_css_class("date-label")
+        claude_post = Gtk.Label(label="— used for the ✨ Modernise button on the Devotional tab.")
+        claude_post.add_css_class("date-label")
+        claude_row0.set_halign(Gtk.Align.START)
+        claude_row0.append(claude_pre)
+        claude_row0.append(claude_link)
+        claude_row0.append(claude_post)
+        box.append(claude_row0)
+
+        claude_key_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        claude_key_lbl = Gtk.Label(label="API key:")
+        claude_key_lbl.set_halign(Gtk.Align.START)
+        claude_key_entry = Gtk.Entry()
+        claude_key_entry.set_text(self.claude_api_key)
+        claude_key_entry.set_placeholder_text("Paste your Claude API key here…")
+        claude_key_entry.set_hexpand(True)
+        claude_key_entry.set_visibility(False)
+        claude_key_entry.set_input_purpose(Gtk.InputPurpose.PASSWORD)
+        show_claude_key_btn = Gtk.CheckButton(label="Show")
+        show_claude_key_btn.connect("toggled", lambda b: claude_key_entry.set_visibility(b.get_active()))
+        claude_key_row.append(claude_key_lbl)
+        claude_key_row.append(claude_key_entry)
+        claude_key_row.append(show_claude_key_btn)
+        box.append(claude_key_row)
+
         # ── Tabs to show / order ──────────────────────────────────────────────
         tabs_header = Gtk.Label(label="TABS — ORDER & VISIBILITY")
         tabs_header.add_css_class("source-label")
@@ -1714,6 +1866,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 web_url_entry.get_text().strip(),
                 web_user_entry.get_text().strip(),
                 web_pass_entry.get_text(),
+                claude_key_entry.get_text().strip(),
             )
             if startup_check.get_active():
                 os.makedirs(os.path.dirname(AUTOSTART_FILE), exist_ok=True)
@@ -1872,7 +2025,7 @@ X-GNOME-Autostart-enabled=true
         dialog.set_child(outer)
         dialog.present()
 
-    def _save_prefs(self, font_size, theme, weather_location, weather_lat, weather_lon, enabled_calendars, visible_tabs, tab_order, api_bible_key="", web_url="", web_user="", web_pass=""):
+    def _save_prefs(self, font_size, theme, weather_location, weather_lat, weather_lon, enabled_calendars, visible_tabs, tab_order, api_bible_key="", web_url="", web_user="", web_pass="", claude_api_key=""):
         self.font_size = font_size
         self.theme = theme
         self.weather_location = weather_location
@@ -1885,6 +2038,7 @@ X-GNOME-Autostart-enabled=true
         self.web_url  = web_url
         self.web_user = web_user
         self.web_pass = web_pass
+        self.claude_api_key = claude_api_key
         self.prefs.update({
             "font_size": font_size,
             "theme": theme,
@@ -1898,6 +2052,7 @@ X-GNOME-Autostart-enabled=true
             "web_url":  web_url,
             "web_user": web_user,
             "web_pass": web_pass,
+            "claude_api_key": claude_api_key,
         })
         save_prefs(self.prefs)
         self._apply_css()
@@ -2036,6 +2191,11 @@ X-GNOME-Autostart-enabled=true
         box.add_css_class("tab-content")
         box.set_spacing(8)
 
+        spurgeon_title = Gtk.Label(label="Spurgeon's Morning and Evening")
+        spurgeon_title.add_css_class("section-title")
+        spurgeon_title.set_halign(Gtk.Align.START)
+        box.append(spurgeon_title)
+
         toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         toolbar.add_css_class("sermon-toolbar")
 
@@ -2061,6 +2221,26 @@ X-GNOME-Autostart-enabled=true
         today_btn.add_css_class("sermon-btn")
         today_btn.connect("clicked", self._spurgeon_today)
         toolbar.append(today_btn)
+
+        self._spurgeon_modernise_btn = Gtk.Button(label="✨ Modernise")
+        self._spurgeon_modernise_btn.add_css_class("sermon-btn")
+        self._spurgeon_modernise_btn.set_tooltip_text("Generate a modern-English version using the Claude API")
+        self._spurgeon_modernise_btn.connect("clicked", self._spurgeon_modernise)
+        toolbar.append(self._spurgeon_modernise_btn)
+
+        self._spurgeon_copy_btn = Gtk.Button(label="📋 Copy for Claude")
+        self._spurgeon_copy_btn.add_css_class("sermon-btn")
+        self._spurgeon_copy_btn.set_tooltip_text(
+            "Copy a prompt to paste into Claude (no API key needed)"
+        )
+        self._spurgeon_copy_btn.connect("clicked", self._spurgeon_copy_for_claude)
+        toolbar.append(self._spurgeon_copy_btn)
+
+        self._spurgeon_paste_btn = Gtk.Button(label="📥 Paste result")
+        self._spurgeon_paste_btn.add_css_class("sermon-btn")
+        self._spurgeon_paste_btn.set_tooltip_text("Paste Claude's reply from the clipboard")
+        self._spurgeon_paste_btn.connect("clicked", self._spurgeon_paste_result)
+        toolbar.append(self._spurgeon_paste_btn)
 
         box.append(toolbar)
 
@@ -2106,6 +2286,85 @@ X-GNOME-Autostart-enabled=true
         self.spurgeon_buffer.set_text("Loading today's reading…")
 
         box.append(self.spurgeon_view)
+
+        # ── Modern English version (generated via Claude) ─────────────────────
+        self._spurgeon_modern_current = None
+        self._spurgeon_pending_refs = None  # {"date": ..., "am": (quote, ref), "pm": (quote, ref)}
+        self._spurgeon_modern_revealer = Gtk.Revealer()
+        self._spurgeon_modern_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+        self._spurgeon_modern_revealer.set_reveal_child(False)
+
+        modern_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        modern_box.set_margin_top(8)
+
+        modern_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        modern_header.add_css_class("sermon-toolbar")
+        modern_title = Gtk.Label(label="✨ Modern English")
+        modern_title.add_css_class("section-title")
+        modern_title.set_halign(Gtk.Align.START)
+        modern_title.set_hexpand(True)
+        modern_header.append(modern_title)
+
+        self._spurgeon_modern_save_status = Gtk.Label(label="")
+        self._spurgeon_modern_save_status.add_css_class("date-label")
+        modern_header.append(self._spurgeon_modern_save_status)
+
+        self._spurgeon_modern_save_btn = Gtk.Button(label="💾 Save")
+        self._spurgeon_modern_save_btn.add_css_class("sermon-btn")
+        self._spurgeon_modern_save_btn.set_tooltip_text("Save this modernised version for this date")
+        self._spurgeon_modern_save_btn.connect("clicked", self._spurgeon_modern_save)
+        modern_header.append(self._spurgeon_modern_save_btn)
+
+        self._spurgeon_modern_push_btn = Gtk.Button(label="📤 Push to web")
+        self._spurgeon_modern_push_btn.add_css_class("sermon-btn")
+        self._spurgeon_modern_push_btn.set_tooltip_text("Push this modernised version to the web app")
+        self._spurgeon_modern_push_btn.connect("clicked", self._spurgeon_modern_push)
+        modern_header.append(self._spurgeon_modern_push_btn)
+
+        modern_box.append(modern_header)
+
+        self._spurgeon_modern_links = []  # list of (start_offset, end_offset, book_idx, chapter)
+
+        self.spurgeon_modern_buffer = Gtk.TextBuffer()
+        self.spurgeon_modern_buffer.create_tag("bold", weight=Pango.Weight.BOLD)
+        self.spurgeon_modern_buffer.create_tag("normal")
+        self.spurgeon_modern_buffer.create_tag(
+            "link",
+            weight=Pango.Weight.BOLD,
+            underline=Pango.Underline.SINGLE,
+            foreground="#5599ff",
+        )
+
+        self.spurgeon_modern_view = Gtk.TextView(buffer=self.spurgeon_modern_buffer)
+        self.spurgeon_modern_view.set_editable(False)
+        self.spurgeon_modern_view.set_cursor_visible(False)
+        self.spurgeon_modern_view.set_wrap_mode(Gtk.WrapMode.WORD)
+        self.spurgeon_modern_view.set_left_margin(12)
+        self.spurgeon_modern_view.set_right_margin(12)
+        self.spurgeon_modern_view.set_top_margin(10)
+        self.spurgeon_modern_view.set_bottom_margin(10)
+        self.spurgeon_modern_view.add_css_class("reading-text")
+
+        self._spurgeon_modern_focus_gained = False
+        self._spurgeon_modern_press_pos = None
+        modern_focus_ctrl = Gtk.EventControllerFocus.new()
+        modern_focus_ctrl.connect("enter", lambda c: setattr(self, '_spurgeon_modern_focus_gained', True))
+        self.spurgeon_modern_view.add_controller(modern_focus_ctrl)
+
+        modern_click = Gtk.GestureClick.new()
+        modern_click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        modern_click.connect("pressed", self._spurgeon_modern_link_clicked)
+        modern_click.connect("released", self._spurgeon_modern_click_released)
+        self.spurgeon_modern_view.add_controller(modern_click)
+
+        modern_motion = Gtk.EventControllerMotion.new()
+        modern_motion.connect("motion", self._spurgeon_modern_motion)
+        self.spurgeon_modern_view.add_controller(modern_motion)
+
+        modern_box.append(self.spurgeon_modern_view)
+        self._spurgeon_modern_revealer.set_child(modern_box)
+        box.append(self._spurgeon_modern_revealer)
+
         left_scroll.set_child(box)
 
         # ── Right pane: date-keyed notes ──────────────────────────────────────
@@ -2197,11 +2456,13 @@ X-GNOME-Autostart-enabled=true
         paned.set_wide_handle(True)
         paned.set_start_child(left_scroll)
         paned.set_end_child(right_box)
-        paned.set_position(700)
+        paned.set_position(self.spurgeon_paned_position)
         paned.set_resize_start_child(True)
         paned.set_shrink_start_child(False)
         paned.set_resize_end_child(True)
         paned.set_shrink_end_child(False)
+        self._spurgeon_paned_save_id = None
+        paned.connect("notify::position", self._spurgeon_paned_position_changed)
 
         self.stack.add_named(paned, "spurgeon")
 
@@ -2226,16 +2487,25 @@ X-GNOME-Autostart-enabled=true
         self.spurgeon_date_label.set_text(date_str)
         self.spurgeon_notes_date_label.set_text("Notes — " + date_str)
         self.spurgeon_buffer.set_text("Loading…")
+        self._spurgeon_modern_current = None
+        self._spurgeon_modern_revealer.set_reveal_child(False)
+        self.spurgeon_modern_buffer.set_text("")
+        self._spurgeon_modern_save_status.set_text("")
         self._spurgeon_notes_load()
         self._spurgeon_comments_load()
         threading.Thread(target=self._load_spurgeon, daemon=True).start()
 
     def _load_spurgeon(self):
-        text = fetch_spurgeon(self._spurgeon_date)
-        GLib.idle_add(self._set_spurgeon, text)
+        date = self._spurgeon_date
+        text = fetch_spurgeon(date)
+        cache = load_spurgeon_cache()
+        cached = cache.get(date.isoformat())
+        GLib.idle_add(self._set_spurgeon, date, text, cached)
 
-    def _set_spurgeon(self, text):
+    def _set_spurgeon(self, date, text, cached=None):
         import re
+        if date != self._spurgeon_date:
+            return
         self.spurgeon_buffer.set_text("")
         self._spurgeon_links = []
         sections = text.split("\n\n─────────────────────────────────\n\n")
@@ -2322,6 +2592,198 @@ X-GNOME-Autostart-enabled=true
                     else:
                         self.spurgeon_buffer.insert_with_tags_by_name(end, body, "normal")
 
+        if cached:
+            self._spurgeon_modern_current = cached
+            self._render_spurgeon_modern(cached)
+            self._spurgeon_modern_revealer.set_reveal_child(True)
+        else:
+            self._spurgeon_modern_current = None
+            self.spurgeon_modern_buffer.set_text("")
+            self._spurgeon_modern_revealer.set_reveal_child(False)
+
+    def _render_spurgeon_modern(self, sections):
+        buf = self.spurgeon_modern_buffer
+        buf.set_text("")
+        self._spurgeon_modern_links = []
+        for label, key in [("☀️ Morning", "am"), ("🌙 Evening", "pm")]:
+            text = (sections.get(key) or "").strip()
+            if not text:
+                continue
+            end = buf.get_end_iter()
+            buf.insert_with_tags_by_name(end, label + "\n\n", "bold")
+
+            # Leading '"<verse text>" <Reference>.' — show verse text in full,
+            # bold/link the reference, then the modernised reflection.
+            quote, ref, rest = extract_spurgeon_verse(text)
+            if quote and ref:
+                end = buf.get_end_iter()
+                buf.insert_with_tags_by_name(end, f'"{quote}" ', "normal")
+                start_off = buf.get_end_iter().get_offset()
+                end = buf.get_end_iter()
+                ref_match = self._parse_spurgeon_ref(ref)
+                buf.insert_with_tags_by_name(end, ref, "link" if ref_match else "bold")
+                end_off = buf.get_end_iter().get_offset()
+                if ref_match:
+                    self._spurgeon_modern_links.append((start_off, end_off, ref_match[0], ref_match[1]))
+                end = buf.get_end_iter()
+                buf.insert_with_tags_by_name(end, ".\n\n", "normal")
+            else:
+                rest = text
+
+            if rest:
+                end = buf.get_end_iter()
+                buf.insert_with_tags_by_name(end, rest + "\n\n", "normal")
+
+    def _spurgeon_modernise(self, btn):
+        api_key = self.claude_api_key.strip()
+        if not api_key:
+            self.spurgeon_modern_buffer.set_text(
+                "Add a Claude API key in Settings to use this feature."
+            )
+            self._spurgeon_modern_revealer.set_reveal_child(True)
+            return
+        date = self._spurgeon_date
+        btn.set_sensitive(False)
+        self.spurgeon_modern_buffer.set_text("Generating modern English version…")
+        self._spurgeon_modern_save_status.set_text("")
+        self._spurgeon_modern_revealer.set_reveal_child(True)
+        threading.Thread(
+            target=self._spurgeon_modernise_thread, args=(date, api_key), daemon=True
+        ).start()
+
+    def _spurgeon_modernise_thread(self, date, api_key):
+        try:
+            am_text, pm_text = split_spurgeon_sections(fetch_spurgeon(date))
+            sections = modernize_spurgeon(am_text, pm_text, api_key)
+        except Exception as e:
+            GLib.idle_add(self._spurgeon_modernise_failed, date, str(e))
+            return
+        GLib.idle_add(self._spurgeon_modernise_done, date, sections)
+
+    def _spurgeon_modernise_done(self, date, sections):
+        self._spurgeon_modernise_btn.set_sensitive(True)
+        if date != self._spurgeon_date:
+            return
+        self._spurgeon_modern_current = sections
+        self._render_spurgeon_modern(sections)
+
+    def _spurgeon_modernise_failed(self, date, error):
+        self._spurgeon_modernise_btn.set_sensitive(True)
+        if date != self._spurgeon_date:
+            return
+        self.spurgeon_modern_buffer.set_text(f"Could not generate modern version: {error}")
+
+    def _spurgeon_copy_for_claude(self, btn):
+        date = self._spurgeon_date
+        btn.set_sensitive(False)
+        threading.Thread(
+            target=self._spurgeon_copy_for_claude_thread, args=(date,), daemon=True
+        ).start()
+
+    def _spurgeon_copy_for_claude_thread(self, date):
+        am_text, pm_text = split_spurgeon_sections(fetch_spurgeon(date))
+        am_quote, am_ref, am_reflection = extract_spurgeon_verse(am_text)
+        pm_quote, pm_ref, pm_reflection = extract_spurgeon_verse(pm_text)
+        prompt = build_modernise_prompt(am_reflection, pm_reflection)
+        refs = {"date": date, "am": (am_quote, am_ref), "pm": (pm_quote, pm_ref)}
+        GLib.idle_add(self._spurgeon_copy_for_claude_done, refs, prompt)
+
+    def _spurgeon_copy_for_claude_done(self, refs, prompt):
+        self._spurgeon_copy_btn.set_sensitive(True)
+        self._spurgeon_pending_refs = refs
+        Gdk.Display.get_default().get_clipboard().set(prompt)
+        self._spurgeon_modern_save_status.set_text(
+            "📋 Copied — paste into Claude, then use 📥 Paste result"
+        )
+        GLib.timeout_add_seconds(5, self._spurgeon_modern_save_status_clear)
+
+    def _spurgeon_paste_result(self, btn):
+        Gdk.Display.get_default().get_clipboard().read_text_async(
+            None, self._spurgeon_paste_result_done
+        )
+
+    def _spurgeon_paste_result_done(self, clipboard, result):
+        try:
+            reply = clipboard.read_text_finish(result)
+        except Exception as e:
+            self.spurgeon_modern_buffer.set_text(f"Could not read clipboard: {e}")
+            self._spurgeon_modern_revealer.set_reveal_child(True)
+            return
+        if not reply:
+            return
+        am_modern, pm_modern = parse_modernise_reply(reply)
+        refs = self._spurgeon_pending_refs
+        if refs and refs["date"] == self._spurgeon_date:
+            am_quote, am_ref = refs["am"]
+            pm_quote, pm_ref = refs["pm"]
+        else:
+            am_quote = am_ref = pm_quote = pm_ref = ""
+        sections = {
+            "am": combine_spurgeon_modern(am_quote, am_ref, am_modern),
+            "pm": combine_spurgeon_modern(pm_quote, pm_ref, pm_modern),
+        }
+        self._spurgeon_modern_current = sections
+        self._render_spurgeon_modern(sections)
+        self._spurgeon_modern_revealer.set_reveal_child(True)
+        self._spurgeon_modern_save_status.set_text("")
+
+    def _spurgeon_modern_save(self, btn):
+        if not self._spurgeon_modern_current:
+            return
+        cache = load_spurgeon_cache()
+        cache[self._spurgeon_date.isoformat()] = self._spurgeon_modern_current
+        save_spurgeon_cache(cache)
+        self._spurgeon_modern_save_status.set_text("✅ Saved")
+        GLib.timeout_add_seconds(2, self._spurgeon_modern_save_status_clear)
+
+    def _spurgeon_modern_push(self, btn):
+        if not self._spurgeon_modern_current:
+            return
+        if not self.web_url:
+            self._spurgeon_modern_save_status.set_text("❌ No web app URL configured in settings.")
+            return
+        date = self._spurgeon_date
+        sections = self._spurgeon_modern_current
+        self._spurgeon_modern_save_status.set_text("Pushing…")
+
+        def run():
+            try:
+                r = requests.post(
+                    _normalize_url(self.web_url) + "/api/spurgeon_modern.php",
+                    json={"date": date.isoformat(), "am": sections.get("am", ""), "pm": sections.get("pm", "")},
+                    auth=(self.web_user, self.web_pass),
+                    timeout=10,
+                )
+                if r.ok:
+                    GLib.idle_add(self._spurgeon_modern_push_done, "✅ Pushed to web app")
+                else:
+                    GLib.idle_add(self._spurgeon_modern_push_done, f"❌ Server returned {r.status_code}.")
+            except Exception as e:
+                GLib.idle_add(self._spurgeon_modern_push_done, f"❌ {e}")
+        threading.Thread(target=run, daemon=True).start()
+
+    def _spurgeon_modern_push_done(self, message):
+        self._spurgeon_modern_save_status.set_text(message)
+        GLib.timeout_add_seconds(2, self._spurgeon_modern_save_status_clear)
+
+    def _spurgeon_modern_save_status_clear(self):
+        self._spurgeon_modern_save_status.set_text("")
+        return False
+
+    def _spurgeon_paned_position_changed(self, paned, _pspec):
+        if self._spurgeon_paned_save_id is not None:
+            GLib.source_remove(self._spurgeon_paned_save_id)
+        self._spurgeon_paned_save_id = GLib.timeout_add(
+            500, self._spurgeon_paned_position_save, paned
+        )
+
+    def _spurgeon_paned_position_save(self, paned):
+        self._spurgeon_paned_save_id = None
+        self.spurgeon_paned_position = paned.get_position()
+        self.prefs["spurgeon_paned_position"] = self.spurgeon_paned_position
+        save_prefs(self.prefs)
+        return False
+
     def _parse_spurgeon_ref(self, text):
         import re
         m = re.match(r'^(.+?)\s+(\d+)(?::\d+[\d–-]*)?', text.strip())
@@ -2384,6 +2846,45 @@ X-GNOME-Autostart-enabled=true
         else:
             cursor = Gdk.Cursor.new_from_name("text", None)
         self.spurgeon_view.set_cursor(cursor)
+
+    def _spurgeon_modern_link_clicked(self, gesture, n_press, x, y):
+        self._spurgeon_modern_press_pos = (x, y)
+        bx, by = self.spurgeon_modern_view.window_to_buffer_coords(
+            Gtk.TextWindowType.WIDGET, int(x), int(y)
+        )
+        ok, it = self.spurgeon_modern_view.get_iter_at_location(bx, by)
+        if not ok:
+            return
+        link_tag = self.spurgeon_modern_buffer.get_tag_table().lookup("link")
+        if not it.has_tag(link_tag):
+            return
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        offset = it.get_offset()
+        for start_off, end_off, book_idx, chapter in self._spurgeon_modern_links:
+            if start_off <= offset < end_off:
+                self._open_bible_ref(book_idx, chapter)
+                break
+
+    def _spurgeon_modern_click_released(self, gesture, n_press, x, y):
+        if not (self._spurgeon_modern_focus_gained and n_press == 1):
+            return
+        self._spurgeon_modern_focus_gained = False
+        press = self._spurgeon_modern_press_pos
+        if press is None or (abs(x - press[0]) < 8 and abs(y - press[1]) < 8):
+            it = self.spurgeon_modern_buffer.get_iter_at_mark(self.spurgeon_modern_buffer.get_insert())
+            self.spurgeon_modern_buffer.place_cursor(it)
+
+    def _spurgeon_modern_motion(self, controller, x, y):
+        bx, by = self.spurgeon_modern_view.window_to_buffer_coords(
+            Gtk.TextWindowType.WIDGET, int(x), int(y)
+        )
+        ok, it = self.spurgeon_modern_view.get_iter_at_location(bx, by)
+        link_tag = self.spurgeon_modern_buffer.get_tag_table().lookup("link")
+        if ok and it.has_tag(link_tag):
+            cursor = Gdk.Cursor.new_from_name("pointer", None)
+        else:
+            cursor = Gdk.Cursor.new_from_name("text", None)
+        self.spurgeon_modern_view.set_cursor(cursor)
 
     def _open_bible_ref(self, book_idx, chapter):
         self._switch_tab("bible")

@@ -13,6 +13,17 @@ try { $date = new DateTime($date_str); } catch (Exception $e) { $date = new Date
 $month = $date->format('m');
 $day   = $date->format('d');
 
+// The romans45.org reading for a given month/day is the same every year, so
+// cache by month-day to avoid re-scraping on every request.
+$cache_file = __DIR__ . '/../data/spurgeon_original_cache.json';
+$cache_key  = "{$month}-{$day}";
+$cache      = file_exists($cache_file) ? (json_decode(file_get_contents($cache_file), true) ?: []) : [];
+
+if (isset($cache[$cache_key])) {
+    echo json_encode(['readings' => $cache[$cache_key]], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 function curl_fetch(string $url, array $headers = []): string {
     $ch = curl_init($url);
     curl_setopt_array($ch, [
@@ -88,6 +99,14 @@ try {
     }
 } catch (Exception $e) {
     $results = [['label' => 'Error', 'text' => 'Could not load reading: ' . $e->getMessage()]];
+}
+
+$valid = !empty($results) && !array_filter($results, fn($r) =>
+    $r['label'] === 'Error' || in_array($r['text'], ['Reading not found.', 'Reading not available.'])
+);
+if ($valid) {
+    $cache[$cache_key] = $results;
+    file_put_contents($cache_file, json_encode($cache, JSON_UNESCAPED_UNICODE), LOCK_EX);
 }
 
 echo json_encode(['readings' => $results], JSON_UNESCAPED_UNICODE);

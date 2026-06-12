@@ -52,6 +52,7 @@ if (!$locked && $_SERVER['REQUEST_METHOD'] === 'POST') {
         _clear_failed_attempts($ip);
         session_regenerate_id(true);
         $_SESSION['user'] = preg_replace('/[^a-zA-Z0-9_\-]/', '', $username);
+        log_login_event($_SESSION['user'], $ip, 'form', true);
         if ($remember) {
             $token = create_remember_token($_SESSION['user']);
             setcookie('remember_me', $token, [
@@ -67,6 +68,7 @@ if (!$locked && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     _record_failed_attempt($ip);
+    log_login_event($username !== '' ? $username : '?', $ip, 'form', false);
     $attempts_left = LOGIN_MAX_ATTEMPTS - _login_attempts($ip);
     $error = $attempts_left > 0
         ? 'Invalid username or password.'

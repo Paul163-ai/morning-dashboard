@@ -64,6 +64,9 @@ let spurgeonDate = new Date();
 spurgeonDate.setHours(0,0,0,0);
 let spurgeonNotesTimer = null;
 let spurgeonNotesLoading = false;
+let spurgeonOriginalReadings = [];
+let spurgeonModernReadings = null;
+let spurgeonVersion = 'original';
 
 // Bible state
 let bibleState = { bookIdx: 0, chapter: 1, translation: 'web' };
@@ -227,11 +230,16 @@ function initSpurgeon() {
     panel.innerHTML = `
     <div class="spurgeon-paned">
       <div class="spurgeon-left">
+        <div class="section-title">Spurgeon's Morning and Evening</div>
         <div class="sermon-toolbar">
           <button class="sermon-btn" id="spur-prev">◀ Prev</button>
           <span class="section-title flex-1" style="text-align:center" id="spur-date-lbl"></span>
           <button class="sermon-btn" id="spur-next">Next ▶</button>
           <button class="sermon-btn" id="spur-today">Today</button>
+        </div>
+        <div class="sermon-toolbar" id="spur-version-toolbar" style="display:none">
+          <button class="sermon-btn active" id="spur-version-original">Original</button>
+          <button class="sermon-btn" id="spur-version-modern">✨ Modern</button>
         </div>
         <div class="spurgeon-reading-scroll">
           <div id="spurgeon-reading"><span class="status-label">Loading today's reading…</span></div>
@@ -259,6 +267,8 @@ function initSpurgeon() {
     document.getElementById('spur-prev').onclick  = () => spurgeonNav(-1);
     document.getElementById('spur-next').onclick  = () => spurgeonNav(+1);
     document.getElementById('spur-today').onclick = () => { spurgeonDate = new Date(); spurgeonDate.setHours(0,0,0,0); spurgeonRefresh(); };
+    document.getElementById('spur-version-original').onclick = () => setSpurgeonVersion('original');
+    document.getElementById('spur-version-modern').onclick   = () => setSpurgeonVersion('modern');
     document.getElementById('spurgeon-notes').addEventListener('input', spurgeonNotesChanged);
     document.getElementById('spur-export-btn').onclick = exportSpurgeonNotes;
     document.getElementById('spur-comment-submit').onclick = postSpurgeonComment;
@@ -279,7 +289,13 @@ function spurgeonRefresh() {
     document.getElementById('spur-date-lbl').textContent = dateStr;
     document.getElementById('spur-notes-date-lbl').textContent = 'Notes — ' + dateStr;
     document.getElementById('spurgeon-reading').innerHTML = '<span class="status-label">Loading…</span>';
+    spurgeonVersion = 'original';
+    spurgeonModernReadings = null;
+    document.getElementById('spur-version-toolbar').style.display = 'none';
+    document.getElementById('spur-version-original').classList.add('active');
+    document.getElementById('spur-version-modern').classList.remove('active');
     loadSpurgeonReading();
+    loadSpurgeonModern();
     loadSpurgeonNotes();
     loadSpurgeonComments();
 }
@@ -287,10 +303,39 @@ function spurgeonRefresh() {
 async function loadSpurgeonReading() {
     try {
         const data = await api('spurgeon.php?date=' + dateToISO(spurgeonDate));
-        renderSpurgeonReading(data.readings || []);
+        spurgeonOriginalReadings = data.readings || [];
+        if (spurgeonVersion === 'original') renderSpurgeonReading(spurgeonOriginalReadings);
     } catch(e) {
         document.getElementById('spurgeon-reading').textContent = 'Could not load reading: ' + e.message;
     }
+}
+
+async function loadSpurgeonModern() {
+    try {
+        const data = await api('spurgeon_modern.php?date=' + dateToISO(spurgeonDate));
+        if (data.am || data.pm) {
+            spurgeonModernReadings = [
+                { label: '☀️ Morning', text: data.am || '' },
+                { label: '🌙 Evening', text: data.pm || '' },
+            ];
+            document.getElementById('spur-version-toolbar').style.display = '';
+        } else {
+            spurgeonModernReadings = null;
+            document.getElementById('spur-version-toolbar').style.display = 'none';
+        }
+    } catch(e) {
+        spurgeonModernReadings = null;
+        document.getElementById('spur-version-toolbar').style.display = 'none';
+    }
+}
+
+function setSpurgeonVersion(version) {
+    if (version === spurgeonVersion) return;
+    if (version === 'modern' && !spurgeonModernReadings) return;
+    spurgeonVersion = version;
+    document.getElementById('spur-version-original').classList.toggle('active', version === 'original');
+    document.getElementById('spur-version-modern').classList.toggle('active', version === 'modern');
+    renderSpurgeonReading(version === 'modern' ? spurgeonModernReadings : spurgeonOriginalReadings);
 }
 
 function renderSpurgeonReading(readings) {
@@ -1158,6 +1203,12 @@ function renderSettingsBody() {
             el('span', { class: 'status-label', style: 'padding:0' }, 'Loading…'));
         body.appendChild(reqBox);
         loadAccessRequests(reqBox);
+
+        body.appendChild(el('div', { class: 'settings-section-label' }, 'LOGIN LOG'));
+        const logBox = el('div', { id: 'login-log-box' },
+            el('span', { class: 'status-label', style: 'padding:0' }, 'Loading…'));
+        body.appendChild(logBox);
+        loadLoginLog(logBox);
     }
 }
 
@@ -1273,11 +1324,16 @@ async function loadUserList(container) {
             container.appendChild(el('div', { class: 'status-label', style: 'padding:0' }, 'No users found.'));
             return;
         }
-        users.forEach(username => {
+        users.forEach(u => {
+            const username  = typeof u === 'string' ? u : u.username;
+            const lastLogin = (typeof u === 'object' && u.last_login)
+                ? new Date(u.last_login * 1000).toLocaleString('en-GB', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:false })
+                : null;
             const isAdmin = username === 'paul';
             const row = el('div', { style: 'display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--header-border)' });
             const nameLbl = el('span', { style: 'flex:1;font-size:14px' }, username);
             if (isAdmin) nameLbl.appendChild(el('span', { style: 'font-size:11px;color:var(--accent);margin-left:6px' }, '(admin)'));
+            if (lastLogin) nameLbl.appendChild(el('span', { style: 'font-size:11px;color:var(--subtext);margin-left:8px' }, 'Last login: ' + lastLogin));
             row.appendChild(nameLbl);
 
             if (!isAdmin) {
@@ -1372,6 +1428,38 @@ async function loadAccessRequests(container) {
         });
     } catch(e) {
         container.textContent = 'Could not load requests.';
+    }
+}
+
+/* ── LOGIN LOG (admin only) ─────────────────────────────────────────── */
+async function loadLoginLog(container) {
+    try {
+        const data = await api('login_log.php');
+        const entries = data.entries || [];
+        container.innerHTML = '';
+        if (!entries.length) {
+            container.appendChild(el('div', { class: 'status-label', style: 'padding:0' }, 'No login events recorded yet.'));
+            return;
+        }
+        const shown = entries.slice(0, 50);
+        shown.forEach(e => {
+            const d   = new Date(e.ts * 1000);
+            const ts  = d.toLocaleString('en-GB', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:false });
+            const row = el('div', { style: 'display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--header-border);font-size:13px' });
+            row.append(
+                el('span', { style: `color:${e.ok ? '#66bb6a' : '#ef5350'};min-width:14px;flex-shrink:0` }, e.ok ? '✓' : '✗'),
+                el('span', { style: 'min-width:80px;flex-shrink:0' }, e.user),
+                el('span', { style: 'color:var(--subtext);font-size:11px;flex:1' }, e.ip || ''),
+                el('span', { style: 'color:var(--subtext);font-size:11px;min-width:52px;text-align:center;flex-shrink:0' }, e.method),
+                el('span', { style: 'color:var(--subtext);font-size:11px;white-space:nowrap;flex-shrink:0' }, ts),
+            );
+            container.appendChild(row);
+        });
+        if (entries.length > 50) {
+            container.appendChild(el('div', { class: 'status-label', style: 'padding:4px 0;font-size:11px' }, `Showing 50 of ${entries.length} events`));
+        }
+    } catch(e) {
+        container.textContent = 'Could not load login log.';
     }
 }
 

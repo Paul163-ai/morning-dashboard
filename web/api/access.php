@@ -51,8 +51,19 @@ if ($action === 'list') {
     echo json_encode(['requests' => load_requests($requests_file)]);
 
 } elseif ($action === 'list_users') {
-    $lines = read_htpasswd_lines();
-    $users = array_values(array_filter(array_map(fn($l) => explode(':', $l)[0], $lines)));
+    $lines    = read_htpasswd_lines();
+    $usernames = array_values(array_filter(array_map(fn($l) => explode(':', $l)[0], $lines)));
+
+    $log_file    = __DIR__ . '/../data/login_log.json';
+    $log         = file_exists($log_file) ? (json_decode(file_get_contents($log_file), true) ?: []) : [];
+    $last_logins = [];
+    foreach ($log as $entry) {
+        if (!empty($entry['ok']) && !empty($entry['user']) && !isset($last_logins[$entry['user']])) {
+            $last_logins[$entry['user']] = $entry['ts'];
+        }
+    }
+
+    $users = array_map(fn($u) => ['username' => $u, 'last_login' => $last_logins[$u] ?? null], $usernames);
     echo json_encode(['users' => $users]);
 
 } elseif ($action === 'approve') {
