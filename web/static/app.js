@@ -55,6 +55,7 @@ const BIBLE_TRANSLATIONS = [
 ];
 
 /* ── State ─────────────────────────────────────────────────────────── */
+const IS_GUEST = window.IS_GUEST === true;
 let prefs = window.INIT_PREFS;
 let activeTab = null;
 const tabLoaded = {};
@@ -133,22 +134,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     buildSidebar();
 
-    // Settings button
-    document.getElementById('settings-btn').addEventListener('click', openSettings);
-    document.getElementById('close-settings-btn').addEventListener('click', closeSettings);
-    document.getElementById('cancel-settings-btn').addEventListener('click', closeSettings);
-    document.getElementById('save-settings-btn').addEventListener('click', saveSettings);
-    document.getElementById('settings-modal').addEventListener('click', e => {
-        if (e.target === e.currentTarget) closeSettings();
-    });
+    if (!IS_GUEST) {
+        // Settings button
+        document.getElementById('settings-btn').addEventListener('click', openSettings);
+        document.getElementById('close-settings-btn').addEventListener('click', closeSettings);
+        document.getElementById('cancel-settings-btn').addEventListener('click', closeSettings);
+        document.getElementById('save-settings-btn').addEventListener('click', saveSettings);
+        document.getElementById('settings-modal').addEventListener('click', e => {
+            if (e.target === e.currentTarget) closeSettings();
+        });
+
+        // Logout button
+        document.getElementById('logout-btn').addEventListener('click', () => {
+            api('logout.php', {method: 'POST'}).then(() => { location.href = '/login.php'; });
+        });
+    }
 
     // Collapse button
     document.getElementById('collapse-btn').addEventListener('click', toggleSidebar);
-
-    // Logout button
-    document.getElementById('logout-btn').addEventListener('click', () => {
-        api('logout.php', {method: 'POST'}).then(() => { location.href = '/login.php'; });
-    });
 
     // Switch to first visible tab
     const firstTab = prefs.tab_order.find(k => prefs.visible_tabs.includes(k));
@@ -245,6 +248,7 @@ function initSpurgeon() {
           <div id="spurgeon-reading"><span class="status-label">Loading today's reading…</span></div>
         </div>
       </div>
+      ${IS_GUEST ? '' : `
       <div class="spurgeon-right">
         <div class="spurgeon-notes-header">
           <span class="section-title" id="spur-notes-date-lbl">Notes</span>
@@ -261,7 +265,7 @@ function initSpurgeon() {
             <button class="sermon-btn" id="spur-comment-submit">Post</button>
           </div>
         </div>
-      </div>
+      </div>`}
     </div>`;
 
     document.getElementById('spur-prev').onclick  = () => spurgeonNav(-1);
@@ -269,12 +273,15 @@ function initSpurgeon() {
     document.getElementById('spur-today').onclick = () => { spurgeonDate = new Date(); spurgeonDate.setHours(0,0,0,0); spurgeonRefresh(); };
     document.getElementById('spur-version-original').onclick = () => setSpurgeonVersion('original');
     document.getElementById('spur-version-modern').onclick   = () => setSpurgeonVersion('modern');
-    document.getElementById('spurgeon-notes').addEventListener('input', spurgeonNotesChanged);
-    document.getElementById('spur-export-btn').onclick = exportSpurgeonNotes;
-    document.getElementById('spur-comment-submit').onclick = postSpurgeonComment;
-    document.getElementById('spur-comment-input').addEventListener('keydown', e => {
-        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) postSpurgeonComment();
-    });
+
+    if (!IS_GUEST) {
+        document.getElementById('spurgeon-notes').addEventListener('input', spurgeonNotesChanged);
+        document.getElementById('spur-export-btn').onclick = exportSpurgeonNotes;
+        document.getElementById('spur-comment-submit').onclick = postSpurgeonComment;
+        document.getElementById('spur-comment-input').addEventListener('keydown', e => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) postSpurgeonComment();
+        });
+    }
 
     spurgeonRefresh();
 }
@@ -287,7 +294,7 @@ function spurgeonNav(delta) {
 function spurgeonRefresh() {
     const dateStr = formatDateFull(spurgeonDate);
     document.getElementById('spur-date-lbl').textContent = dateStr;
-    document.getElementById('spur-notes-date-lbl').textContent = 'Notes — ' + dateStr;
+    if (!IS_GUEST) document.getElementById('spur-notes-date-lbl').textContent = 'Notes — ' + dateStr;
     document.getElementById('spurgeon-reading').innerHTML = '<span class="status-label">Loading…</span>';
     spurgeonVersion = 'original';
     spurgeonModernReadings = null;
@@ -296,8 +303,10 @@ function spurgeonRefresh() {
     document.getElementById('spur-version-modern').classList.remove('active');
     loadSpurgeonReading();
     loadSpurgeonModern();
-    loadSpurgeonNotes();
-    loadSpurgeonComments();
+    if (!IS_GUEST) {
+        loadSpurgeonNotes();
+        loadSpurgeonComments();
+    }
 }
 
 async function loadSpurgeonReading() {
@@ -804,7 +813,10 @@ function makePrayerItem(item, dataIdx, undoneTotal, undonePos) {
     cb.checked = item.done;
     cb.onchange = () => { prayerData[dataIdx].done = cb.checked; savePrayer(); renderPrayer(); };
 
-    const txt = el('span', { class: 'prayer-text' }, item.text);
+    const txt = makeEditablePrayerText(item.text, newText => {
+        prayerData[dataIdx].text = newText;
+        savePrayer();
+    });
     const row = el('div', { class: 'prayer-item' + (item.done ? ' done' : '') }, cb, txt);
 
     if (!item.done) {
@@ -868,7 +880,10 @@ function makeSubPrayerItem(child, parentIdx, childIdx) {
         renderPrayer();
     };
 
-    const txt = el('span', { class: 'prayer-text' }, child.text);
+    const txt = makeEditablePrayerText(child.text, newText => {
+        prayerData[parentIdx].children[childIdx].text = newText;
+        savePrayer();
+    });
 
     const delBtn = el('button', { class: 'prayer-move-btn', title: 'Remove sub-point' }, '✕');
     delBtn.onclick = () => {
@@ -878,6 +893,34 @@ function makeSubPrayerItem(child, parentIdx, childIdx) {
     };
 
     return el('div', { class: 'prayer-subitem' + (child.done ? ' done' : '') }, cb, txt, delBtn);
+}
+
+function makeEditablePrayerText(text, onSave) {
+    const txt = el('span', { class: 'prayer-text', title: 'Click to edit' }, text);
+    txt.onclick = () => {
+        const inp = el('input', { type: 'text', class: 'prayer-edit-input', value: text });
+        txt.replaceWith(inp);
+        inp.focus();
+        inp.select();
+
+        let cancelled = false;
+        const finish = save => {
+            const newText = inp.value.trim();
+            if (save && !cancelled && newText && newText !== text) {
+                onSave(newText);
+                renderPrayer();
+            } else {
+                inp.replaceWith(txt);
+            }
+        };
+
+        inp.addEventListener('blur', () => finish(true));
+        inp.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+            if (e.key === 'Escape') { cancelled = true; inp.blur(); }
+        });
+    };
+    return txt;
 }
 
 function swapPrayer(idx, delta) {

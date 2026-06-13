@@ -1,21 +1,33 @@
 <?php
 require_once __DIR__ . '/helpers.php';
-$prefs_file = user_data_dir() . '/prefs.json';
-$prefs      = [];
-if (file_exists($prefs_file)) {
-    $prefs = json_decode(file_get_contents($prefs_file), true) ?: [];
-}
-$username = current_user();
-$theme            = $prefs['theme']            ?? 'dark';
-$font_size        = (int)($prefs['font_size']  ?? 13);
-$all_tabs         = ['spurgeon','prayer','news','bible','weather','notes','sermons'];
-$tab_order        = $prefs['tab_order']        ?? $all_tabs;
-$visible_tabs     = $prefs['visible_tabs']     ?? $all_tabs;
-$sidebar_collapsed = (bool)($prefs['sidebar_collapsed'] ?? false);
 
-// Ensure all tabs are represented in tab_order
-foreach ($all_tabs as $t) {
-    if (!in_array($t, $tab_order)) $tab_order[] = $t;
+$guest    = !is_authenticated();
+$username = current_user();
+$prefs    = [];
+
+if ($guest) {
+    $theme             = 'dark';
+    $font_size         = 13;
+    $all_tabs          = ['spurgeon'];
+    $tab_order         = ['spurgeon'];
+    $visible_tabs      = ['spurgeon'];
+    $sidebar_collapsed = false;
+} else {
+    $prefs_file = user_data_dir() . '/prefs.json';
+    if (file_exists($prefs_file)) {
+        $prefs = json_decode(file_get_contents($prefs_file), true) ?: [];
+    }
+    $theme            = $prefs['theme']            ?? 'dark';
+    $font_size        = (int)($prefs['font_size']  ?? 13);
+    $all_tabs         = ['spurgeon','prayer','news','bible','weather','notes','sermons'];
+    $tab_order        = $prefs['tab_order']        ?? $all_tabs;
+    $visible_tabs     = $prefs['visible_tabs']     ?? $all_tabs;
+    $sidebar_collapsed = (bool)($prefs['sidebar_collapsed'] ?? false);
+
+    // Ensure all tabs are represented in tab_order
+    foreach ($all_tabs as $t) {
+        if (!in_array($t, $tab_order)) $tab_order[] = $t;
+    }
 }
 
 $init_prefs = json_encode([
@@ -42,15 +54,19 @@ $init_prefs = json_encode([
         :root { --font-size: <?= $font_size ?>px; }
     </style>
 </head>
-<body>
+<body<?= $guest ? ' class="guest"' : '' ?>>
 <div id="app">
 
     <header id="header">
         <div class="app-title">☀️ Morning Dashboard</div>
         <div class="date-label" id="date-label"></div>
+        <?php if ($guest): ?>
+        <a class="logout-btn" href="/login.php">Log in</a>
+        <?php else: ?>
         <div class="user-label"><?= htmlspecialchars($username) ?></div>
         <button class="prefs-button" id="settings-btn">⚙️ Settings</button>
         <button class="logout-btn" id="logout-btn">Log out</button>
+        <?php endif; ?>
     </header>
 
     <div id="body">
@@ -74,8 +90,15 @@ $init_prefs = json_encode([
             <?php endforeach; ?>
         </main>
     </div>
+
+    <?php if ($guest): ?>
+    <footer id="guest-footer">
+        <a href="/login.php">Log in for more features</a>
+    </footer>
+    <?php endif; ?>
 </div>
 
+<?php if (!$guest): ?>
 <!-- Settings Modal -->
 <div id="settings-modal" class="modal-overlay" hidden>
     <div class="modal-box">
@@ -90,11 +113,13 @@ $init_prefs = json_encode([
         </div>
     </div>
 </div>
+<?php endif; ?>
 
 <script>
 window.INIT_PREFS  = <?= $init_prefs ?>;
-window.IS_ADMIN      = <?= (current_user() === ADMIN_USER) ? 'true' : 'false' ?>;
+window.IS_ADMIN      = <?= (!$guest && current_user() === ADMIN_USER) ? 'true' : 'false' ?>;
 window.CURRENT_USER  = <?= json_encode(current_user()) ?>;
+window.IS_GUEST      = <?= $guest ? 'true' : 'false' ?>;
 </script>
 <script src="static/app.js"></script>
 </body>

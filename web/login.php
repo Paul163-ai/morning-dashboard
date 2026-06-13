@@ -56,7 +56,7 @@ if (!$locked && $_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($remember) {
             $token = create_remember_token($_SESSION['user']);
             setcookie('remember_me', $token, [
-                'expires'  => time() + 30 * 24 * 3600,
+                'expires'  => time() + REMEMBER_ME_DURATION,
                 'path'     => '/',
                 'secure'   => true,
                 'httponly' => true,
@@ -169,6 +169,18 @@ if (!$locked && $_SERVER['REQUEST_METHOD'] === 'POST') {
             color: #a0a0c0;
         }
         .request-link a { color: #5599ff; }
+        .guest-link {
+            display: block;
+            text-align: center;
+            margin-top: 0.75rem;
+            padding: 0.65rem;
+            border: 1px solid #1e4080;
+            border-radius: 6px;
+            color: #a0a0c0;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+        .guest-link:hover { border-color: #4a80c0; color: #e0e0e0; }
     </style>
 </head>
 <body>
@@ -189,11 +201,12 @@ if (!$locked && $_SERVER['REQUEST_METHOD'] === 'POST') {
         <label class="remember-row">
             <input type="checkbox" name="remember" <?= !empty($_POST['remember']) ? 'checked' : '' ?>
                    <?= $locked ? 'disabled' : '' ?>>
-            Remember me for 30 days
+            Remember me
         </label>
         <button type="submit" class="btn" <?= $locked ? 'disabled' : '' ?>>Log in</button>
     </form>
     <div class="request-link"><a href="/request.php">Request access</a></div>
+    <a class="guest-link" href="/">Continue without logging in</a>
 </div>
 </body>
 </html>

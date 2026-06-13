@@ -76,7 +76,9 @@ root (Gtk.Box, vertical)
 - **Browser:** PHP session (`$_SESSION['user']`) set on login. Remember-me cookie (`remember_me`) backed by `data/remember_tokens.json` (64-char random hex, 30-day expiry, rotated on every use).
 - **Desktop app:** HTTP Basic Auth — credentials verified against `.htpasswd` (APR1-MD5 hashes; bcrypt dropped for shared-hosting compatibility) via `verify_htpasswd()`. Sets `$_MD_AUTH_USER` for the request scope; never touches the session.
 
-`config.php` defines `ADMIN_USER` ('paul') and `HTPASSWD_FILE`. `helpers.php` provides `current_user()` and `user_data_dir()`.
+`config.php` defines `ADMIN_USER` ('paul') and `HTPASSWD_FILE`. `helpers.php` provides `current_user()`, `is_authenticated()`, and `user_data_dir()`.
+
+**Guest (logged-out) view:** `require_auth()` lets unauthenticated visitors load `index.php` instead of redirecting to `/login.php`, plus logged-out GET requests to `api/spurgeon.php` and `api/spurgeon_modern.php` (both stateless/read-only). `index.php` detects this via `is_authenticated()`, sets `window.IS_GUEST = true`, and forces a minimal config: only the `spurgeon` tab, no prefs loaded/saved, no settings modal, "Log in" link instead of user/logout. `app.js` checks `IS_GUEST` to skip rendering the notes textarea and Community Comments panel, and to skip the per-user API calls (`spurgeon_notes.php`, `spurgeon_comments.php`) that would 401.
 
 **CSRF protection:** After `require_auth()`, `helpers.php` checks that any POST/DELETE/PUT from a session-authenticated user includes `X-Requested-With: XMLHttpRequest`. Basic Auth requests (desktop app) are exempt. The `api()` function in `app.js` sends this header on every fetch call.
 

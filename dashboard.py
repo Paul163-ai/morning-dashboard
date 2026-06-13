@@ -354,13 +354,24 @@ def fetch_apibible_chapter(book_id, chapter, bible_name, api_key):
 # ── Spurgeon helper ──────────────────────────────────────────────────────────
 
 def fetch_spurgeon(date=None):
-    """Fetch Morning & Evening reading from romans45.org archive."""
+    """Fetch Morning & Evening reading from romans45.org archive.
+
+    The reading for a given month/day is the same every year, so results are
+    cached locally by month-day to avoid re-scraping on every visit.
+    """
     import re
     if date is None:
         date = datetime.date.today()
 
     month = date.strftime("%m")
     day   = date.strftime("%d")
+    cache_key = f"{month}-{day}"
+
+    original_cache = load_spurgeon_original_cache()
+    if cache_key in original_cache:
+        return "\n\n─────────────────────────────────\n\n".join(
+            f"{label}\n\n{text}" for label, text in original_cache[cache_key]
+        )
 
     results = []
     try:
@@ -381,7 +392,7 @@ def fetch_spurgeon(date=None):
             if pos == -1:
                 pos = html.find(f"'{anchor}'")
             if pos == -1:
-                results.append(f"{label}\n\nReading not found.")
+                results.append((label, "Reading not found."))
                 continue
 
             # Find the next anchor position to use as boundary
@@ -417,14 +428,23 @@ def fetch_spurgeon(date=None):
                 text = re.sub(r'^[^>]*>\s*', '', text)
                 # Strip any trailing anchor tag
                 text = re.sub(r'\s*<?\s*a\s+name=.*$', '', text, flags=re.IGNORECASE).strip()
-                results.append(f"{label}\n\n{text[:3000]}")
+                results.append((label, text[:3000]))
             else:
-                results.append(f"{label}\n\nReading not available.")
+                results.append((label, "Reading not available."))
 
     except Exception as e:
         return f"Error loading reading: {e}"
 
-    return "\n\n─────────────────────────────────\n\n".join(results)
+    valid = results and not any(
+        text in ("Reading not found.", "Reading not available.") for _, text in results
+    )
+    if valid:
+        original_cache[cache_key] = results
+        save_spurgeon_original_cache(original_cache)
+
+    return "\n\n─────────────────────────────────\n\n".join(
+        f"{label}\n\n{text}" for label, text in results
+    )
 
 # ── Spurgeon modernisation (Claude API) ───────────────────────────────────────
 
@@ -588,6 +608,7 @@ def fetch_news_proxied(url):
 PREFS_FILE     = os.path.expanduser("~/.config/morning-dashboard/prefs.json")
 AUTOSTART_FILE = os.path.expanduser("~/.config/autostart/morning-dashboard.desktop")
 SPURGEON_CACHE_FILE = os.path.expanduser("~/.config/morning-dashboard/spurgeon_cache.json")
+SPURGEON_ORIGINAL_CACHE_FILE = os.path.expanduser("~/.config/morning-dashboard/spurgeon_original_cache.json")
 
 ALL_TABS = ["spurgeon", "news", "weather", "sermons", "calendar", "bible", "prayer", "notes"]
 
@@ -616,6 +637,18 @@ def load_spurgeon_cache():
 def save_spurgeon_cache(cache):
     os.makedirs(os.path.dirname(SPURGEON_CACHE_FILE), exist_ok=True)
     with open(SPURGEON_CACHE_FILE, "w") as f:
+        json.dump(cache, f, ensure_ascii=False, indent=2)
+
+def load_spurgeon_original_cache():
+    try:
+        with open(SPURGEON_ORIGINAL_CACHE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_spurgeon_original_cache(cache):
+    os.makedirs(os.path.dirname(SPURGEON_ORIGINAL_CACHE_FILE), exist_ok=True)
+    with open(SPURGEON_ORIGINAL_CACHE_FILE, "w") as f:
         json.dump(cache, f, ensure_ascii=False, indent=2)
 
 # ── Custom TextView with theme-coloured cursor ────────────────────────────────
@@ -2244,6 +2277,30 @@ X-GNOME-Autostart-enabled=true
 
         box.append(toolbar)
 
+        # ── Original / Modern version toggle ───────────────────────────────
+        self._spurgeon_version = "original"
+        version_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        version_toolbar.add_css_class("sermon-toolbar")
+
+        self._spurgeon_version_original_btn = Gtk.Button(label="Original")
+        self._spurgeon_version_original_btn.add_css_class("sermon-btn")
+        self._spurgeon_version_original_btn.add_css_class("suggested-action")
+        self._spurgeon_version_original_btn.connect(
+            "clicked", lambda b: self._spurgeon_set_version("original")
+        )
+        version_toolbar.append(self._spurgeon_version_original_btn)
+
+        self._spurgeon_version_modern_btn = Gtk.Button(label="✨ Modern")
+        self._spurgeon_version_modern_btn.add_css_class("sermon-btn")
+        self._spurgeon_version_modern_btn.connect(
+            "clicked", lambda b: self._spurgeon_set_version("modern")
+        )
+        version_toolbar.append(self._spurgeon_version_modern_btn)
+
+        version_toolbar.set_visible(False)
+        self._spurgeon_version_toolbar = version_toolbar
+        box.append(version_toolbar)
+
         self._spurgeon_links = []  # list of (start_offset, end_offset, book_idx, chapter)
 
         self.spurgeon_buffer = Gtk.TextBuffer()
@@ -2309,15 +2366,9 @@ X-GNOME-Autostart-enabled=true
         self._spurgeon_modern_save_status.add_css_class("date-label")
         modern_header.append(self._spurgeon_modern_save_status)
 
-        self._spurgeon_modern_save_btn = Gtk.Button(label="💾 Save")
-        self._spurgeon_modern_save_btn.add_css_class("sermon-btn")
-        self._spurgeon_modern_save_btn.set_tooltip_text("Save this modernised version for this date")
-        self._spurgeon_modern_save_btn.connect("clicked", self._spurgeon_modern_save)
-        modern_header.append(self._spurgeon_modern_save_btn)
-
         self._spurgeon_modern_push_btn = Gtk.Button(label="📤 Push to web")
         self._spurgeon_modern_push_btn.add_css_class("sermon-btn")
-        self._spurgeon_modern_push_btn.set_tooltip_text("Push this modernised version to the web app")
+        self._spurgeon_modern_push_btn.set_tooltip_text("Save and push this modernised version to the web app")
         self._spurgeon_modern_push_btn.connect("clicked", self._spurgeon_modern_push)
         modern_header.append(self._spurgeon_modern_push_btn)
 
@@ -2488,7 +2539,9 @@ X-GNOME-Autostart-enabled=true
         self.spurgeon_notes_date_label.set_text("Notes — " + date_str)
         self.spurgeon_buffer.set_text("Loading…")
         self._spurgeon_modern_current = None
-        self._spurgeon_modern_revealer.set_reveal_child(False)
+        self._spurgeon_show_modern(False)
+        self._spurgeon_version_toolbar.set_visible(False)
+        self._spurgeon_version_modern_btn.set_sensitive(False)
         self.spurgeon_modern_buffer.set_text("")
         self._spurgeon_modern_save_status.set_text("")
         self._spurgeon_notes_load()
@@ -2595,11 +2648,33 @@ X-GNOME-Autostart-enabled=true
         if cached:
             self._spurgeon_modern_current = cached
             self._render_spurgeon_modern(cached)
-            self._spurgeon_modern_revealer.set_reveal_child(True)
+            self._spurgeon_version_toolbar.set_visible(True)
+            self._spurgeon_version_modern_btn.set_sensitive(True)
         else:
             self._spurgeon_modern_current = None
             self.spurgeon_modern_buffer.set_text("")
-            self._spurgeon_modern_revealer.set_reveal_child(False)
+            self._spurgeon_version_toolbar.set_visible(False)
+            self._spurgeon_version_modern_btn.set_sensitive(False)
+
+    def _spurgeon_show_modern(self, show):
+        self._spurgeon_version = "modern" if show else "original"
+        self.spurgeon_view.set_visible(not show)
+        self._spurgeon_modern_revealer.set_reveal_child(show)
+        for btn, active in (
+            (self._spurgeon_version_original_btn, not show),
+            (self._spurgeon_version_modern_btn, show),
+        ):
+            if active:
+                btn.add_css_class("suggested-action")
+            else:
+                btn.remove_css_class("suggested-action")
+
+    def _spurgeon_set_version(self, version):
+        if version == "modern" and not self._spurgeon_modern_current:
+            return
+        if version == self._spurgeon_version:
+            return
+        self._spurgeon_show_modern(version == "modern")
 
     def _render_spurgeon_modern(self, sections):
         buf = self.spurgeon_modern_buffer
@@ -2640,13 +2715,15 @@ X-GNOME-Autostart-enabled=true
             self.spurgeon_modern_buffer.set_text(
                 "Add a Claude API key in Settings to use this feature."
             )
-            self._spurgeon_modern_revealer.set_reveal_child(True)
+            self._spurgeon_version_toolbar.set_visible(True)
+            self._spurgeon_show_modern(True)
             return
         date = self._spurgeon_date
         btn.set_sensitive(False)
         self.spurgeon_modern_buffer.set_text("Generating modern English version…")
         self._spurgeon_modern_save_status.set_text("")
-        self._spurgeon_modern_revealer.set_reveal_child(True)
+        self._spurgeon_version_toolbar.set_visible(True)
+        self._spurgeon_show_modern(True)
         threading.Thread(
             target=self._spurgeon_modernise_thread, args=(date, api_key), daemon=True
         ).start()
@@ -2666,6 +2743,7 @@ X-GNOME-Autostart-enabled=true
             return
         self._spurgeon_modern_current = sections
         self._render_spurgeon_modern(sections)
+        self._spurgeon_version_modern_btn.set_sensitive(True)
 
     def _spurgeon_modernise_failed(self, date, error):
         self._spurgeon_modernise_btn.set_sensitive(True)
@@ -2707,7 +2785,8 @@ X-GNOME-Autostart-enabled=true
             reply = clipboard.read_text_finish(result)
         except Exception as e:
             self.spurgeon_modern_buffer.set_text(f"Could not read clipboard: {e}")
-            self._spurgeon_modern_revealer.set_reveal_child(True)
+            self._spurgeon_version_toolbar.set_visible(True)
+            self._spurgeon_show_modern(True)
             return
         if not reply:
             return
@@ -2724,17 +2803,10 @@ X-GNOME-Autostart-enabled=true
         }
         self._spurgeon_modern_current = sections
         self._render_spurgeon_modern(sections)
-        self._spurgeon_modern_revealer.set_reveal_child(True)
+        self._spurgeon_version_toolbar.set_visible(True)
+        self._spurgeon_version_modern_btn.set_sensitive(True)
+        self._spurgeon_show_modern(True)
         self._spurgeon_modern_save_status.set_text("")
-
-    def _spurgeon_modern_save(self, btn):
-        if not self._spurgeon_modern_current:
-            return
-        cache = load_spurgeon_cache()
-        cache[self._spurgeon_date.isoformat()] = self._spurgeon_modern_current
-        save_spurgeon_cache(cache)
-        self._spurgeon_modern_save_status.set_text("✅ Saved")
-        GLib.timeout_add_seconds(2, self._spurgeon_modern_save_status_clear)
 
     def _spurgeon_modern_push(self, btn):
         if not self._spurgeon_modern_current:
@@ -2742,6 +2814,9 @@ X-GNOME-Autostart-enabled=true
         if not self.web_url:
             self._spurgeon_modern_save_status.set_text("❌ No web app URL configured in settings.")
             return
+        cache = load_spurgeon_cache()
+        cache[self._spurgeon_date.isoformat()] = self._spurgeon_modern_current
+        save_spurgeon_cache(cache)
         date = self._spurgeon_date
         sections = self._spurgeon_modern_current
         self._spurgeon_modern_save_status.set_text("Pushing…")
@@ -2755,7 +2830,7 @@ X-GNOME-Autostart-enabled=true
                     timeout=10,
                 )
                 if r.ok:
-                    GLib.idle_add(self._spurgeon_modern_push_done, "✅ Pushed to web app")
+                    GLib.idle_add(self._spurgeon_modern_push_done, "✅ Saved & pushed to web app")
                 else:
                     GLib.idle_add(self._spurgeon_modern_push_done, f"❌ Server returned {r.status_code}.")
             except Exception as e:
@@ -4141,6 +4216,11 @@ X-GNOME-Autostart-enabled=true
         else:
             lbl.add_css_class("prayer-item")
 
+        lbl.set_cursor(Gdk.Cursor.new_from_name("text"))
+        edit_gesture = Gtk.GestureClick()
+        edit_gesture.connect("released", lambda g, n, x, y: self._prayer_start_edit(prayer, lbl, row))
+        lbl.add_controller(edit_gesture)
+
         del_btn = Gtk.Button(label="✕")
         del_btn.add_css_class("sermon-btn")
         del_btn.connect("clicked", self._prayer_delete, prayer, parent)
@@ -4215,6 +4295,43 @@ X-GNOME-Autostart-enabled=true
         row.append(cancel_btn)
         row.append(ok_btn)
         self.prayer_list_box.append(row)
+        entry.grab_focus()
+
+    def _prayer_start_edit(self, prayer, lbl, row):
+        entry = Gtk.Entry()
+        entry.set_text(prayer["text"])
+        entry.set_hexpand(True)
+        entry.add_css_class("sermon-title-entry")
+
+        finished = [False]
+
+        def finish(save):
+            if finished[0]:
+                return
+            finished[0] = True
+            if save:
+                text = entry.get_text().strip()
+                if text and text != prayer["text"]:
+                    prayer["text"] = text
+                    self._prayer_save()
+            self._prayer_render()
+
+        key_ctrl = Gtk.EventControllerKey()
+        def on_key(ctrl, keyval, keycode, state):
+            if keyval == Gdk.KEY_Escape:
+                finish(False)
+                return True
+            return False
+        key_ctrl.connect("key-pressed", on_key)
+        entry.add_controller(key_ctrl)
+        entry.connect("activate", lambda e: finish(True))
+
+        focus_ctrl = Gtk.EventControllerFocus()
+        focus_ctrl.connect("leave", lambda c: finish(True))
+        entry.add_controller(focus_ctrl)
+
+        row.insert_child_after(entry, lbl)
+        row.remove(lbl)
         entry.grab_focus()
 
     def _prayer_start_add_child(self, parent_prayer):

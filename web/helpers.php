@@ -13,10 +13,18 @@ if (session_status() === PHP_SESSION_NONE) {
 // Set by require_auth(); read by current_user(). Not persisted to session.
 $_MD_AUTH_USER = null;
 
+// "Remember me" token/cookie lifetime — effectively unlimited (10 years).
+const REMEMBER_ME_DURATION = 10 * 365 * 24 * 3600;
+
 function current_user(): string {
     global $_MD_AUTH_USER;
     $user = $_MD_AUTH_USER ?? ($_SESSION['user'] ?? '');
     return preg_replace('/[^a-zA-Z0-9_\-]/', '', $user) ?: 'default';
+}
+
+function is_authenticated(): bool {
+    global $_MD_AUTH_USER;
+    return $_MD_AUTH_USER !== null || !empty($_SESSION['user']);
 }
 
 function user_data_dir(): string {
@@ -40,7 +48,7 @@ function create_remember_token(string $username): string {
     foreach ($tokens as $t => $d) {
         if ($d['expires'] < $now) unset($tokens[$t]);
     }
-    $tokens[$token] = ['user' => $username, 'expires' => $now + 30 * 24 * 3600];
+    $tokens[$token] = ['user' => $username, 'expires' => $now + REMEMBER_ME_DURATION];
     file_put_contents($file, json_encode($tokens), LOCK_EX);
     return $token;
 }
@@ -133,7 +141,7 @@ function require_auth(): void {
         if ($user !== null) {
             invalidate_remember_token($token);
             $new_token = create_remember_token($user);
-            setcookie('remember_me', $new_token, ['expires' => time() + 30 * 24 * 3600, 'path' => '/', 'secure' => true, 'httponly' => true, 'samesite' => 'Lax']);
+            setcookie('remember_me', $new_token, ['expires' => time() + REMEMBER_ME_DURATION, 'path' => '/', 'secure' => true, 'httponly' => true, 'samesite' => 'Lax']);
             $_SESSION['user'] = $user;
             log_login_event($user, $_SERVER['REMOTE_ADDR'] ?? 'unknown', 'remember', true);
             return;
@@ -154,7 +162,11 @@ function require_auth(): void {
 
     // Not authenticated
     $script = basename($_SERVER['SCRIPT_FILENAME'] ?? '');
-    if (in_array($script, ['login.php', 'request.php', 'setup.php'])) return;
+    if (in_array($script, ['login.php', 'request.php', 'setup.php', 'index.php'])) return;
+
+    // Allow guest (logged-out) access to the read-only devotional reading,
+    // used by the public view shown on index.php for unauthenticated visitors.
+    if (in_array($script, ['spurgeon.php', 'spurgeon_modern.php']) && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') return;
 
     if (_is_api_request()) {
         if (!headers_sent()) header('Content-Type: application/json; charset=utf-8');
