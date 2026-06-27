@@ -165,10 +165,15 @@ if (!$locked && $_SERVER['REQUEST_METHOD'] === 'POST') {
         .request-link {
             text-align: center;
             margin-top: 1.25rem;
-            font-size: 0.85rem;
+            padding-top: 1.25rem;
+            border-top: 1px solid #0f3460;
+            font-size: 0.9rem;
             color: #a0a0c0;
         }
-        .request-link a { color: #5599ff; }
+        .request-link a {
+            color: #5599ff;
+            font-weight: 600;
+        }
         .guest-link {
             display: block;
             text-align: center;
@@ -205,7 +210,7 @@ if (!$locked && $_SERVER['REQUEST_METHOD'] === 'POST') {
         </label>
         <button type="submit" class="btn" <?= $locked ? 'disabled' : '' ?>>Log in</button>
     </form>
-    <div class="request-link"><a href="/request.php">Request access</a></div>
+    <div class="request-link">New here? You'll need an account first — <a href="/request.php">Request access</a></div>
     <a class="guest-link" href="/">Continue without logging in</a>
 </div>
 </body>

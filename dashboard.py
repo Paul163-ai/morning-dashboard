@@ -485,8 +485,9 @@ def build_modernise_prompt(am_reflection, pm_reflection):
     """Build the prompt asking Claude to modernise the two Spurgeon reflections."""
     return (
         "Rewrite the following two devotional reflections by Charles Spurgeon "
-        "in clear, modern English. Preserve the meaning and tone. Do not add "
-        "titles, headings, commentary, Bible quotations or markdown formatting "
+        "in clear, modern English, using British English spelling and "
+        "conventions. Preserve the meaning and tone. Do not add titles, "
+        "headings, commentary, Bible quotations or markdown formatting "
         "— return plain prose only.\n\n"
         "Reply in exactly this format, with no other text:\n"
         "===AM===\n<modernised morning reflection>\n"
@@ -1316,6 +1317,26 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 color: {subtext};
                 font-size: {fs}px;
                 text-decoration: line-through;
+            }}
+            .prayer-diary-banner {{
+                background-color: {'#3a1a1a' if dark else '#fff5f5'};
+                border-left: 3px solid #ef5350;
+                border-radius: 0 6px 6px 0;
+                padding: 8px 14px;
+            }}
+            .prayer-diary-day {{
+                font-size: {fs}px;
+                font-weight: bold;
+                color: #ef5350;
+            }}
+            .prayer-diary-names {{
+                font-size: {fs}px;
+                color: {text};
+            }}
+            .prayer-diary-theme {{
+                font-size: {max(fs - 1, 10)}px;
+                color: {subtext};
+                font-style: italic;
             }}
             .prefs-box {{
                 background-color: {bg};
@@ -3480,6 +3501,17 @@ X-GNOME-Autostart-enabled=true
 
         right.append(toolbar)
 
+        # Web sync toolbar
+        web_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        web_toolbar.add_css_class("sermon-toolbar")
+
+        web_sync_btn = Gtk.Button(label="⇅ Sync with web")
+        web_sync_btn.add_css_class("sermon-btn")
+        web_sync_btn.connect("clicked", lambda b: self._sermon_sync_web())
+        web_toolbar.append(web_sync_btn)
+
+        right.append(web_toolbar)
+
         # Sync status label
         self.sync_status = Gtk.Label(label="")
         self.sync_status.add_css_class("date-label")
@@ -3687,6 +3719,89 @@ X-GNOME-Autostart-enabled=true
                 row.append(title_lbl)
                 row.append(cal_lbl)
                 self.cal_box.append(row)
+
+    def _sermon_sync_web(self):
+        if not self.web_url:
+            GLib.idle_add(self.sync_status.set_text, "❌ No web app URL configured in settings.")
+            return
+        GLib.idle_add(self.sync_status.set_text, "Syncing sermons…")
+        def run():
+            try:
+                base = _normalize_url(self.web_url) + "/api/sermons.php"
+                auth = (self.web_user, self.web_pass)
+
+                r = requests.get(base, auth=auth, timeout=10)
+                if not r.ok:
+                    GLib.idle_add(self.sync_status.set_text, f"❌ Server returned {r.status_code}.")
+                    return
+                data = r.json()
+                web_files = set(data.get("sermons", []))
+                web_mtimes = data.get("mtimes", {})
+
+                local_files = {
+                    f: os.path.getmtime(os.path.join(self.sermons_dir, f))
+                    for f in os.listdir(self.sermons_dir) if f.endswith(".txt")
+                }
+
+                pushed = pulled = skipped = 0
+
+                for fname in web_files | set(local_files):
+                    local_path = os.path.join(self.sermons_dir, fname)
+                    in_local = fname in local_files
+                    in_web   = fname in web_files
+
+                    if in_local and not in_web:
+                        with open(local_path) as f:
+                            text = f.read()
+                        r2 = requests.post(base, json={"title": fname[:-4], "text": text}, auth=auth, timeout=15)
+                        if not r2.ok:
+                            GLib.idle_add(self.sync_status.set_text, f"❌ Failed pushing {fname}: {r2.status_code}")
+                            return
+                        pushed += 1
+
+                    elif in_web and not in_local:
+                        r2 = requests.get(base, params={"file": fname}, auth=auth, timeout=15)
+                        if not r2.ok:
+                            GLib.idle_add(self.sync_status.set_text, f"❌ Failed fetching {fname}: {r2.status_code}")
+                            return
+                        with open(local_path, "w") as f:
+                            f.write(r2.json().get("text", ""))
+                        pulled += 1
+
+                    else:
+                        r2 = requests.get(base, params={"file": fname}, auth=auth, timeout=15)
+                        if not r2.ok:
+                            GLib.idle_add(self.sync_status.set_text, f"❌ Failed fetching {fname}: {r2.status_code}")
+                            return
+                        web_text = r2.json().get("text", "")
+                        with open(local_path) as f:
+                            local_text = f.read()
+
+                        if local_text == web_text:
+                            skipped += 1
+                            continue
+
+                        if local_files[fname] >= web_mtimes.get(fname, 0):
+                            r3 = requests.post(base, json={"title": fname[:-4], "text": local_text}, auth=auth, timeout=15)
+                            if not r3.ok:
+                                GLib.idle_add(self.sync_status.set_text, f"❌ Failed pushing {fname}: {r3.status_code}")
+                                return
+                            pushed += 1
+                        else:
+                            with open(local_path, "w") as f:
+                                f.write(web_text)
+                            pulled += 1
+
+                GLib.idle_add(self._refresh_sermon_list)
+                parts = []
+                if pushed:  parts.append(f"{pushed} pushed")
+                if pulled:  parts.append(f"{pulled} pulled")
+                if skipped: parts.append(f"{skipped} unchanged")
+                GLib.idle_add(self.sync_status.set_text,
+                              "✅ Synced: " + (", ".join(parts) if parts else "nothing to do") + ".")
+            except Exception as e:
+                GLib.idle_add(self.sync_status.set_text, f"❌ {e}")
+        threading.Thread(target=run, daemon=True).start()
 
     def _sync_to_drive(self, btn):
         if not os.path.exists(CREDENTIALS):
@@ -3946,6 +4061,39 @@ X-GNOME-Autostart-enabled=true
         header_row.append(title)
         header_row.append(clear_btn)
         outer.append(header_row)
+
+        # Hall Green prayer diary banner
+        try:
+            diary_path = os.path.join(PROJECT_DIR, "prayer_diary.json")
+            with open(diary_path) as _f:
+                _diary = json.load(_f)
+            _today = datetime.date.today()
+            _day_num = min(_today.day, 30)
+            _day_key = str(_day_num)
+            _month_name = _today.strftime("%B")
+            _diary_names = _diary.get("days", {}).get(_day_key, "")
+            _diary_theme = _diary.get("monthly_themes", {}).get(_month_name, "")
+
+            diary_banner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            diary_banner.add_css_class("prayer-diary-banner")
+            diary_banner.set_margin_bottom(4)
+
+            day_lbl = Gtk.Label(label=f"Day {_day_num}: {_diary_names}")
+            day_lbl.add_css_class("prayer-diary-names")
+            day_lbl.set_halign(Gtk.Align.START)
+            day_lbl.set_wrap(True)
+            diary_banner.append(day_lbl)
+
+            if _diary_theme:
+                theme_lbl = Gtk.Label(label=f"{_month_name}: {_diary_theme}")
+                theme_lbl.add_css_class("prayer-diary-theme")
+                theme_lbl.set_halign(Gtk.Align.START)
+                theme_lbl.set_wrap(True)
+                diary_banner.append(theme_lbl)
+
+            outer.append(diary_banner)
+        except Exception:
+            pass
 
         # Add new prayer row
         add_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)

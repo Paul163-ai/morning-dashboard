@@ -69,12 +69,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     $username = preg_replace('/[^a-zA-Z0-9_\-]/', '', trim($_POST['username'] ?? ''));
     $name     = substr(strip_tags(trim($_POST['name']     ?? '')), 0, 100);
+    $email    = substr(strip_tags(trim($_POST['email']    ?? '')), 0, 200);
     $reason   = substr(strip_tags(trim($_POST['reason']   ?? '')), 0, 500);
     $password  = $_POST['password']  ?? '';
     $password2 = $_POST['password2'] ?? '';
 
     if (!$username || !$name) {
         $message = 'Please fill in your username and name.';
+        $message_type = 'error';
+    } elseif ($email && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $message = 'Please enter a valid email address.';
         $message_type = 'error';
     } elseif (strlen($password) < 8) {
         $message = 'Password must be at least 8 characters.';
@@ -102,6 +106,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $requests[] = [
                 'username'      => $username,
                 'name'          => $name,
+                'email'         => $email,
                 'reason'        => $reason,
                 'password_hash' => apr1_md5($password),
                 'requested'     => date('Y-m-d H:i:s'),
@@ -109,6 +114,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ];
             file_put_contents($requests_file, json_encode($requests, JSON_PRETTY_PRINT));
             $submitted = true;
+
+            $subject = 'Morning Dashboard: access request from ' . $username;
+            $body    = "New access request received.\n\n"
+                     . "Username: $username\n"
+                     . "Name: $name\n"
+                     . "Email: " . ($email ?: '(not provided)') . "\n"
+                     . "Reason: " . ($reason ?: '(not provided)') . "\n"
+                     . "Requested: " . date('Y-m-d H:i:s') . "\n\n"
+                     . "Approve or deny via the admin panel.";
+            $headers = 'From: Morning Dashboard <' . ADMIN_EMAIL . ">\r\n"
+                     . 'Content-Type: text/plain; charset=UTF-8';
+            @mail(ADMIN_EMAIL, $subject, $body, $headers);
         }
     }
 }
@@ -135,6 +152,10 @@ render:
             <label for="name">Your name</label>
             <input type="text" id="name" name="name" required maxlength="100"
                    value="<?= htmlspecialchars($_POST['name'] ?? '') ?>">
+
+            <label for="email">Your email (optional)</label>
+            <input type="email" id="email" name="email" maxlength="200"
+                   value="<?= htmlspecialchars($_POST['email'] ?? '') ?>">
 
             <label for="reason">Why would you like access? (optional)</label>
             <textarea id="reason" name="reason" maxlength="500"><?= htmlspecialchars($_POST['reason'] ?? '') ?></textarea>

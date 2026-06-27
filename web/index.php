@@ -6,11 +6,12 @@ $username = current_user();
 $prefs    = [];
 
 if ($guest) {
-    $theme             = 'dark';
+    record_guest_visit($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+    $theme             = 'light';
     $font_size         = 13;
-    $all_tabs          = ['spurgeon'];
-    $tab_order         = ['spurgeon'];
-    $visible_tabs      = ['spurgeon'];
+    $all_tabs          = ['spurgeon', 'bible'];
+    $tab_order         = ['spurgeon', 'bible'];
+    $visible_tabs      = ['spurgeon', 'bible'];
     $sidebar_collapsed = false;
 } else {
     $prefs_file = user_data_dir() . '/prefs.json';

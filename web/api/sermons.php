@@ -56,8 +56,12 @@ if ($method === 'DELETE') {
 
 } else {
     // List all sermons
-    $files = glob($sermons_dir . '/*.txt');
-    $names = array_map('basename', $files ?: []);
+    $files = glob($sermons_dir . '/*.txt') ?: [];
+    $names = array_map('basename', $files);
     sort($names);
-    echo json_encode(['sermons' => $names]);
+    $mtimes = [];
+    foreach ($files as $f) {
+        $mtimes[basename($f)] = filemtime($f);
+    }
+    echo json_encode(['sermons' => $names, 'mtimes' => $mtimes]);
 }

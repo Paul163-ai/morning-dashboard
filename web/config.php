@@ -2,6 +2,9 @@
 // Your login username — this account gets the admin panel
 define('ADMIN_USER', 'paul');
 
+// Email address notified when someone submits an access request
+define('ADMIN_EMAIL', 'paul.lintott@gmail.com');
+
 // Absolute path to your .htpasswd file
 // Find this in DirectAdmin → Password Protected Directories, or ask your host
 define('HTPASSWD_FILE', '/home/paul163/domains/md.paullintott.uk/.htpasswd');

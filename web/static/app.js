@@ -1247,6 +1247,12 @@ function renderSettingsBody() {
         body.appendChild(reqBox);
         loadAccessRequests(reqBox);
 
+        body.appendChild(el('div', { class: 'settings-section-label' }, 'GUEST VISITORS'));
+        const visitorsBox = el('div', { id: 'guest-visitors-box' },
+            el('span', { class: 'status-label', style: 'padding:0' }, 'Loading…'));
+        body.appendChild(visitorsBox);
+        loadGuestVisits(visitorsBox);
+
         body.appendChild(el('div', { class: 'settings-section-label' }, 'LOGIN LOG'));
         const logBox = el('div', { id: 'login-log-box' },
             el('span', { class: 'status-label', style: 'padding:0' }, 'Loading…'));
@@ -1421,6 +1427,9 @@ async function loadAccessRequests(container) {
                 el('strong', {}, r.username),
                 el('span',   { style: 'color:var(--subtext);font-size:12px;margin-left:8px' }, r.name),
             );
+            if (r.email) {
+                info.appendChild(el('div', { style: 'font-size:12px;color:var(--subtext);margin-top:2px' }, r.email));
+            }
             if (r.reason) {
                 info.appendChild(el('div', { style: 'font-size:12px;color:var(--subtext);margin-top:2px' }, r.reason));
             }
@@ -1471,6 +1480,18 @@ async function loadAccessRequests(container) {
         });
     } catch(e) {
         container.textContent = 'Could not load requests.';
+    }
+}
+
+/* ── GUEST VISITORS (admin only) ───────────────────────────────────── */
+async function loadGuestVisits(container) {
+    try {
+        const data = await api('guest_visits.php');
+        container.innerHTML = '';
+        container.appendChild(el('div', { style: 'font-size:14px;padding:4px 0' },
+            'Total guest page views: ', el('strong', {}, String(data.total || 0))));
+    } catch(e) {
+        container.textContent = 'Could not load visitor count.';
     }
 }
 

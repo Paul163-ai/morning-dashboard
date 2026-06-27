@@ -87,6 +87,18 @@ function log_login_event(string $user, string $ip, string $method, bool $ok): vo
     file_put_contents($file, json_encode($entries), LOCK_EX);
 }
 
+// --- Guest visits ---
+
+function record_guest_visit(string $ip): void {
+    $file = __DIR__ . '/data/guest_visits.json';
+    $data = file_exists($file) ? (json_decode(file_get_contents($file), true) ?: []) : [];
+    $data['total'] = ($data['total'] ?? 0) + 1;
+    $data['entries'] = $data['entries'] ?? [];
+    array_unshift($data['entries'], ['ts' => time(), 'ip' => $ip]);
+    if (count($data['entries']) > 200) $data['entries'] = array_slice($data['entries'], 0, 200);
+    file_put_contents($file, json_encode($data), LOCK_EX);
+}
+
 // --- Auth ---
 
 function verify_htpasswd(string $username, string $password): bool {
@@ -166,7 +178,7 @@ function require_auth(): void {
 
     // Allow guest (logged-out) access to the read-only devotional reading,
     // used by the public view shown on index.php for unauthenticated visitors.
-    if (in_array($script, ['spurgeon.php', 'spurgeon_modern.php']) && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') return;
+    if (in_array($script, ['spurgeon.php', 'spurgeon_modern.php', 'bible.php']) && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') return;
 
     if (_is_api_request()) {
         if (!headers_sent()) header('Content-Type: application/json; charset=utf-8');

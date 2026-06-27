@@ -124,7 +124,6 @@ a { color: #5599ff; }
 }
 
 /* ── Guest (logged-out) view ──────────────────────────────────────── */
-body.guest #sidebar { display: none; }
 body.guest #content { padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px)); }
 
 #guest-footer {
