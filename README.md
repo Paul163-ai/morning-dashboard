@@ -19,6 +19,14 @@ A personal daily briefing app for the Linux desktop, built with Python and GTK4.
 - Collapsible sidebar navigation with per-tab accent colours
 - ⚙️ Preferences — dark/light theme, font size, location search, tab visibility/ordering, data export/import, web app prayer sync, autostart
 
+## Download
+
+**[Latest release (.deb)](https://github.com/Paul163-ai/morning-dashboard/releases/latest)** — for Ubuntu 24.04 / Linux Mint 22+
+
+```bash
+sudo dpkg -i morning-dashboard_*.deb
+```
+
 ## Requirements
 
 - Linux with GTK4 (Linux Mint 22+, Ubuntu 24.04+)
