@@ -243,6 +243,7 @@ function initSpurgeon() {
         <div class="sermon-toolbar" id="spur-version-toolbar" style="display:none">
           <button class="sermon-btn active" id="spur-version-original">Original</button>
           <button class="sermon-btn" id="spur-version-modern">✨ Modern</button>
+          ${window.IS_ADMIN ? '<button class="sermon-btn" id="spur-modern-edit" style="display:none">✏️ Edit</button>' : ''}
         </div>
         <div class="spurgeon-reading-scroll">
           <div id="spurgeon-reading"><span class="status-label">Loading today's reading…</span></div>
@@ -273,6 +274,9 @@ function initSpurgeon() {
     document.getElementById('spur-today').onclick = () => { spurgeonDate = new Date(); spurgeonDate.setHours(0,0,0,0); spurgeonRefresh(); };
     document.getElementById('spur-version-original').onclick = () => setSpurgeonVersion('original');
     document.getElementById('spur-version-modern').onclick   = () => setSpurgeonVersion('modern');
+    if (window.IS_ADMIN) {
+        document.getElementById('spur-modern-edit').onclick = enterSpurgeonEditMode;
+    }
 
     if (!IS_GUEST) {
         document.getElementById('spurgeon-notes').addEventListener('input', spurgeonNotesChanged);
@@ -301,6 +305,11 @@ function spurgeonRefresh() {
     document.getElementById('spur-version-toolbar').style.display = 'none';
     document.getElementById('spur-version-original').classList.add('active');
     document.getElementById('spur-version-modern').classList.remove('active');
+    if (window.IS_ADMIN) {
+        document.getElementById('spur-modern-edit').style.display = 'none';
+        document.getElementById('spur-modern-edit').textContent = '✏️ Edit';
+    }
+    document.getElementById('spur-version-modern').disabled = false;
     loadSpurgeonReading();
     loadSpurgeonModern();
     if (!IS_GUEST) {
@@ -328,13 +337,26 @@ async function loadSpurgeonModern() {
                 { label: '🌙 Evening', text: data.pm || '' },
             ];
             document.getElementById('spur-version-toolbar').style.display = '';
+            document.getElementById('spur-version-modern').disabled = false;
+            if (window.IS_ADMIN) document.getElementById('spur-modern-edit').textContent = '✏️ Edit';
         } else {
             spurgeonModernReadings = null;
-            document.getElementById('spur-version-toolbar').style.display = 'none';
+            // Admins still see the toolbar so they can create a modern version
+            document.getElementById('spur-version-toolbar').style.display = window.IS_ADMIN ? '' : 'none';
+            if (window.IS_ADMIN) {
+                document.getElementById('spur-version-modern').disabled = true;
+                document.getElementById('spur-modern-edit').style.display = '';
+                document.getElementById('spur-modern-edit').textContent = '✏️ Add Modern';
+            }
         }
     } catch(e) {
         spurgeonModernReadings = null;
-        document.getElementById('spur-version-toolbar').style.display = 'none';
+        document.getElementById('spur-version-toolbar').style.display = window.IS_ADMIN ? '' : 'none';
+        if (window.IS_ADMIN) {
+            document.getElementById('spur-version-modern').disabled = true;
+            document.getElementById('spur-modern-edit').style.display = '';
+            document.getElementById('spur-modern-edit').textContent = '✏️ Add Modern';
+        }
     }
 }
 
@@ -344,7 +366,89 @@ function setSpurgeonVersion(version) {
     spurgeonVersion = version;
     document.getElementById('spur-version-original').classList.toggle('active', version === 'original');
     document.getElementById('spur-version-modern').classList.toggle('active', version === 'modern');
+    if (window.IS_ADMIN) {
+        document.getElementById('spur-modern-edit').style.display = version === 'modern' ? '' : 'none';
+    }
     renderSpurgeonReading(version === 'modern' ? spurgeonModernReadings : spurgeonOriginalReadings);
+}
+
+function enterSpurgeonEditMode() {
+    const am = spurgeonModernReadings?.[0]?.text ?? '';
+    const pm = spurgeonModernReadings?.[1]?.text ?? '';
+    const container = document.getElementById('spurgeon-reading');
+    container.innerHTML = '';
+
+    const makeLabel = (text) => {
+        const s = document.createElement('span');
+        s.className = 'section-heading';
+        s.textContent = text;
+        return s;
+    };
+    const amLabel  = makeLabel('☀️ Morning');
+    const amArea   = document.createElement('textarea');
+    amArea.id      = 'spur-edit-am';
+    amArea.className = 'spur-edit-area';
+    amArea.value   = am;
+    amArea.rows    = 12;
+
+    const hr = document.createElement('hr');
+    hr.className = 'divider';
+
+    const pmLabel  = makeLabel('🌙 Evening');
+    const pmArea   = document.createElement('textarea');
+    pmArea.id      = 'spur-edit-pm';
+    pmArea.className = 'spur-edit-area';
+    pmArea.value   = pm;
+    pmArea.rows    = 12;
+
+    const toolbar  = document.createElement('div');
+    toolbar.className = 'sermon-toolbar';
+    const saveBtn  = document.createElement('button');
+    saveBtn.className = 'sermon-btn';
+    saveBtn.textContent = 'Save';
+    saveBtn.onclick = saveSpurgeonModern;
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'sermon-btn';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = () => renderSpurgeonReading(spurgeonModernReadings ?? spurgeonOriginalReadings);
+    toolbar.appendChild(saveBtn);
+    toolbar.appendChild(cancelBtn);
+
+    container.appendChild(amLabel);
+    container.appendChild(amArea);
+    container.appendChild(hr);
+    container.appendChild(pmLabel);
+    container.appendChild(pmArea);
+    container.appendChild(toolbar);
+    amArea.focus();
+}
+
+async function saveSpurgeonModern() {
+    const amArea = document.getElementById('spur-edit-am');
+    const pmArea = document.getElementById('spur-edit-pm');
+    if (!amArea || !pmArea) return;
+    const am = amArea.value;
+    const pm = pmArea.value;
+    try {
+        await api('spurgeon_modern.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date: dateToISO(spurgeonDate), am, pm }),
+        });
+        spurgeonModernReadings = [
+            { label: '☀️ Morning', text: am },
+            { label: '🌙 Evening', text: pm },
+        ];
+        document.getElementById('spur-version-modern').disabled = false;
+        document.getElementById('spur-modern-edit').textContent = '✏️ Edit';
+        spurgeonVersion = 'modern';
+        document.getElementById('spur-version-original').classList.remove('active');
+        document.getElementById('spur-version-modern').classList.add('active');
+        document.getElementById('spur-modern-edit').style.display = '';
+        renderSpurgeonReading(spurgeonModernReadings);
+    } catch(e) {
+        alert('Save failed: ' + e.message);
+    }
 }
 
 function renderSpurgeonReading(readings) {

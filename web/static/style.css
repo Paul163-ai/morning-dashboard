@@ -451,6 +451,23 @@ body.guest #content { padding-bottom: calc(40px + env(safe-area-inset-bottom, 0p
 }
 #spurgeon-notes::placeholder { color: var(--subtext); }
 
+.spur-edit-area {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--input-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px;
+    font-size: var(--font-size);
+    font-family: inherit;
+    resize: vertical;
+    line-height: 1.7;
+    outline: none;
+    caret-color: #f0a500;
+    margin-bottom: 8px;
+}
+
 .spur-comments-section {
     flex: 1;
     display: flex;

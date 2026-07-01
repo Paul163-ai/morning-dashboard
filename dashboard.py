@@ -2387,6 +2387,13 @@ X-GNOME-Autostart-enabled=true
         self._spurgeon_modern_save_status.add_css_class("date-label")
         modern_header.append(self._spurgeon_modern_save_status)
 
+        self._spurgeon_modern_edit_btn = Gtk.Button(label="✏️ Edit")
+        self._spurgeon_modern_edit_btn.add_css_class("sermon-btn")
+        self._spurgeon_modern_edit_btn.set_tooltip_text("Edit the modern English text")
+        self._spurgeon_modern_edit_btn.set_visible(False)
+        self._spurgeon_modern_edit_btn.connect("clicked", self._spurgeon_modern_enter_edit)
+        modern_header.append(self._spurgeon_modern_edit_btn)
+
         self._spurgeon_modern_push_btn = Gtk.Button(label="📤 Push to web")
         self._spurgeon_modern_push_btn.add_css_class("sermon-btn")
         self._spurgeon_modern_push_btn.set_tooltip_text("Save and push this modernised version to the web app")
@@ -2433,7 +2440,65 @@ X-GNOME-Autostart-enabled=true
         modern_motion.connect("motion", self._spurgeon_modern_motion)
         self.spurgeon_modern_view.add_controller(modern_motion)
 
-        modern_box.append(self.spurgeon_modern_view)
+        self._spurgeon_modern_stack = Gtk.Stack()
+        self._spurgeon_modern_stack.set_transition_type(Gtk.StackTransitionType.NONE)
+        self._spurgeon_modern_stack.add_named(self.spurgeon_modern_view, "view")
+
+        # Edit page: two editable textviews for AM and PM
+        edit_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+
+        am_label = Gtk.Label(label="☀️ Morning")
+        am_label.add_css_class("section-title")
+        am_label.set_halign(Gtk.Align.START)
+        am_label.set_margin_start(4)
+        edit_page.append(am_label)
+
+        self._spurgeon_edit_am_buf = Gtk.TextBuffer()
+        self._spurgeon_edit_am_view = Gtk.TextView(buffer=self._spurgeon_edit_am_buf)
+        self._spurgeon_edit_am_view.set_wrap_mode(Gtk.WrapMode.WORD)
+        self._spurgeon_edit_am_view.set_left_margin(8)
+        self._spurgeon_edit_am_view.set_right_margin(8)
+        self._spurgeon_edit_am_view.set_top_margin(6)
+        self._spurgeon_edit_am_view.set_bottom_margin(6)
+        self._spurgeon_edit_am_view.add_css_class("reading-text")
+        am_scroll = Gtk.ScrolledWindow()
+        am_scroll.set_vexpand(True)
+        am_scroll.set_child(self._spurgeon_edit_am_view)
+        edit_page.append(am_scroll)
+
+        pm_label = Gtk.Label(label="🌙 Evening")
+        pm_label.add_css_class("section-title")
+        pm_label.set_halign(Gtk.Align.START)
+        pm_label.set_margin_start(4)
+        edit_page.append(pm_label)
+
+        self._spurgeon_edit_pm_buf = Gtk.TextBuffer()
+        self._spurgeon_edit_pm_view = Gtk.TextView(buffer=self._spurgeon_edit_pm_buf)
+        self._spurgeon_edit_pm_view.set_wrap_mode(Gtk.WrapMode.WORD)
+        self._spurgeon_edit_pm_view.set_left_margin(8)
+        self._spurgeon_edit_pm_view.set_right_margin(8)
+        self._spurgeon_edit_pm_view.set_top_margin(6)
+        self._spurgeon_edit_pm_view.set_bottom_margin(6)
+        self._spurgeon_edit_pm_view.add_css_class("reading-text")
+        pm_scroll = Gtk.ScrolledWindow()
+        pm_scroll.set_vexpand(True)
+        pm_scroll.set_child(self._spurgeon_edit_pm_view)
+        edit_page.append(pm_scroll)
+
+        edit_btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        edit_btn_row.add_css_class("sermon-toolbar")
+        save_btn = Gtk.Button(label="Save")
+        save_btn.add_css_class("sermon-btn")
+        save_btn.connect("clicked", self._spurgeon_modern_save_edit)
+        edit_btn_row.append(save_btn)
+        cancel_btn = Gtk.Button(label="Cancel")
+        cancel_btn.add_css_class("sermon-btn")
+        cancel_btn.connect("clicked", lambda b: self._spurgeon_modern_exit_edit())
+        edit_btn_row.append(cancel_btn)
+        edit_page.append(edit_btn_row)
+
+        self._spurgeon_modern_stack.add_named(edit_page, "edit")
+        modern_box.append(self._spurgeon_modern_stack)
         self._spurgeon_modern_revealer.set_child(modern_box)
         box.append(self._spurgeon_modern_revealer)
 
@@ -2565,6 +2630,8 @@ X-GNOME-Autostart-enabled=true
         self._spurgeon_version_modern_btn.set_sensitive(False)
         self.spurgeon_modern_buffer.set_text("")
         self._spurgeon_modern_save_status.set_text("")
+        self._spurgeon_modern_stack.set_visible_child_name("view")
+        self._spurgeon_modern_push_btn.set_sensitive(True)
         self._spurgeon_notes_load()
         self._spurgeon_comments_load()
         threading.Thread(target=self._load_spurgeon, daemon=True).start()
@@ -2681,6 +2748,7 @@ X-GNOME-Autostart-enabled=true
         self._spurgeon_version = "modern" if show else "original"
         self.spurgeon_view.set_visible(not show)
         self._spurgeon_modern_revealer.set_reveal_child(show)
+        self._spurgeon_modern_edit_btn.set_visible(show)
         for btn, active in (
             (self._spurgeon_version_original_btn, not show),
             (self._spurgeon_version_modern_btn, show),
@@ -2696,6 +2764,35 @@ X-GNOME-Autostart-enabled=true
         if version == self._spurgeon_version:
             return
         self._spurgeon_show_modern(version == "modern")
+
+    def _spurgeon_modern_enter_edit(self, btn=None):
+        sections = self._spurgeon_modern_current or {"am": "", "pm": ""}
+        self._spurgeon_edit_am_buf.set_text(sections.get("am", ""))
+        self._spurgeon_edit_pm_buf.set_text(sections.get("pm", ""))
+        self._spurgeon_modern_stack.set_visible_child_name("edit")
+        self._spurgeon_modern_edit_btn.set_visible(False)
+        self._spurgeon_modern_push_btn.set_sensitive(False)
+        self._spurgeon_edit_am_view.grab_focus()
+
+    def _spurgeon_modern_exit_edit(self):
+        self._spurgeon_modern_stack.set_visible_child_name("view")
+        self._spurgeon_modern_edit_btn.set_visible(True)
+        self._spurgeon_modern_push_btn.set_sensitive(True)
+
+    def _spurgeon_modern_save_edit(self, btn=None):
+        am = self._spurgeon_edit_am_buf.get_text(
+            self._spurgeon_edit_am_buf.get_start_iter(),
+            self._spurgeon_edit_am_buf.get_end_iter(),
+            False,
+        )
+        pm = self._spurgeon_edit_pm_buf.get_text(
+            self._spurgeon_edit_pm_buf.get_start_iter(),
+            self._spurgeon_edit_pm_buf.get_end_iter(),
+            False,
+        )
+        self._spurgeon_modern_current = {"am": am, "pm": pm}
+        self._render_spurgeon_modern(self._spurgeon_modern_current)
+        self._spurgeon_modern_exit_edit()
 
     def _render_spurgeon_modern(self, sections):
         buf = self.spurgeon_modern_buffer
