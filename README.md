@@ -9,6 +9,7 @@ A personal daily briefing app for the Linux desktop, built with Python and GTK4.
 ## Features
 
 - 📖 Spurgeon Morning & Evening devotional with date-keyed notes
+- 📚 Systematic Theology devotional (Wayne Grudem) with jump-to-section navigation
 - 📰 News — BBC, AI & Tech headlines
 - 🌤️ Weather — current conditions and 7-day forecast
 - 📜 Bible reader — 10 translations, all 66 books
