@@ -35,6 +35,20 @@ if (isset($_GET['export'])) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $body = json_decode(file_get_contents('php://input'), true);
+
+    if (isset($body['all']) && is_array($body['all'])) {
+        $data = [];
+        foreach ($body['all'] as $key => $text) {
+            $date = preg_replace('/[^0-9\-]/', '', (string)$key);
+            if ($date !== '' && $text !== '') {
+                $data[$date] = $text;
+            }
+        }
+        file_put_contents($notes_file, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        echo json_encode(['ok' => true]);
+        exit;
+    }
+
     $date = preg_replace('/[^0-9\-]/', '', $body['date'] ?? date('Y-m-d'));
     $text = $body['text'] ?? '';
 
@@ -46,6 +60,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     file_put_contents($notes_file, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
     echo json_encode(['ok' => true]);
+} elseif (isset($_GET['all'])) {
+    echo json_encode(['notes' => load_notes($notes_file)], JSON_UNESCAPED_UNICODE);
 } else {
     $date = preg_replace('/[^0-9\-]/', '', $_GET['date'] ?? date('Y-m-d'));
     $data = load_notes($notes_file);
