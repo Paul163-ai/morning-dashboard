@@ -451,6 +451,64 @@ body.guest #content { padding-bottom: calc(40px + env(safe-area-inset-bottom, 0p
 }
 #spurgeon-notes::placeholder { color: var(--subtext); }
 
+/* ── Systematics Tab ───────────────────────────────────────────────── */
+.systematics-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 16px;
+    max-width: 800px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+.systematics-reading-scroll {
+    flex: 1;
+    overflow-y: auto;
+    margin-top: 8px;
+}
+
+#systematics-reading {
+    font-size: var(--font-size);
+    color: var(--reading);
+    line-height: 1.8;
+}
+
+#systematics-reading .section-heading {
+    font-weight: bold;
+    font-size: calc(var(--font-size) - 1px);
+    color: #7e57c2;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    display: block;
+    margin-bottom: 4px;
+}
+
+.systematics-title {
+    color: var(--text);
+    margin: 0 0 16px 0;
+    font-size: calc(var(--font-size) + 6px);
+}
+
+.systematics-verse {
+    margin: 0 0 20px 0;
+    padding: 10px 16px;
+    border-left: 3px solid #7e57c2;
+    background: var(--header-bg);
+    border-radius: 0 6px 6px 0;
+    font-style: italic;
+}
+
+.systematics-section {
+    margin-bottom: 20px;
+}
+
+#systematics-reading p {
+    margin: 0 0 12px 0;
+}
+#systematics-reading p:last-child { margin-bottom: 0; }
+
 .spur-edit-area {
     width: 100%;
     box-sizing: border-box;
@@ -617,6 +675,19 @@ body.guest #content { padding-bottom: calc(40px + env(safe-area-inset-bottom, 0p
         flex: none;
         overflow: visible;
         max-height: none;
+    }
+
+    /* Systematics: same single-page-scroll treatment as Spurgeon */
+    #tab-systematics {
+        overflow-y: auto;
+    }
+    .systematics-pane {
+        flex: none;
+        overflow: visible;
+    }
+    .systematics-reading-scroll {
+        flex: none;
+        overflow: visible;
     }
 }
 

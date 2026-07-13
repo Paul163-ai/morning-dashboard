@@ -245,6 +245,21 @@ BIBLE_TRANSLATIONS = [
     ("NIV (API.Bible)", "apibible:NIV"),
 ]
 
+# The seven divisions of the year (plus the Day 365 capstone), from
+# web/Systematics/365-outline.md — each entry is the day-of-year its
+# division begins on. Kept as a small static list rather than parsed at
+# runtime, mirroring the same list in web/static/app.js.
+SYSTEMATICS_DIVISIONS = [
+    (1,   "The Doctrine of the Word of God"),
+    (29,  "The Doctrine of God"),
+    (99,  "The Doctrine of Man"),
+    (127, "The Doctrines of Christ and the Holy Spirit"),
+    (183, "The Application of Redemption"),
+    (246, "The Doctrine of the Church"),
+    (316, "The Doctrine of the Future"),
+    (365, "Capstone"),
+]
+
 # Bible IDs on the API.Bible platform (rest.api.bible).
 _APIBIBLE_IDS = {
     "CSB": "a556c5305ee15c3f-01",
@@ -611,7 +626,7 @@ AUTOSTART_FILE = os.path.expanduser("~/.config/autostart/morning-dashboard.deskt
 SPURGEON_CACHE_FILE = os.path.expanduser("~/.config/morning-dashboard/spurgeon_cache.json")
 SPURGEON_ORIGINAL_CACHE_FILE = os.path.expanduser("~/.config/morning-dashboard/spurgeon_original_cache.json")
 
-ALL_TABS = ["spurgeon", "news", "weather", "sermons", "calendar", "bible", "prayer", "notes"]
+ALL_TABS = ["spurgeon", "systematics", "news", "weather", "sermons", "calendar", "bible", "prayer", "notes"]
 
 def load_prefs():
     defaults = {"font_size": 13, "theme": "dark", "weather_location": "", "weather_country": "GB", "enabled_calendars": [], "visible_tabs": ALL_TABS[:], "tab_order": ALL_TABS[:]}
@@ -729,6 +744,15 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self.enabled_calendars = self.prefs.get("enabled_calendars", [])
         self.visible_tabs = self.prefs.get("visible_tabs", ALL_TABS[:])
         self.tab_order = self.prefs.get("tab_order", ALL_TABS[:])
+        # Newly-introduced tabs are inserted at their canonical position from
+        # ALL_TABS (not just appended at the end) and made visible by default,
+        # so a brand-new tab shows up in the right place for existing users
+        # without them having to visit Settings first.
+        for idx, key in enumerate(ALL_TABS):
+            if key not in self.tab_order:
+                self.tab_order.insert(min(idx, len(self.tab_order)), key)
+                if key not in self.visible_tabs:
+                    self.visible_tabs.append(key)
         self.api_bible_key = self.prefs.get("api_bible_key", "")
         self.claude_api_key = self.prefs.get("claude_api_key", "")
         self.spurgeon_paned_position = self.prefs.get("spurgeon_paned_position", 700)
@@ -821,6 +845,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
             "bible":    ("📜", "Bible",      "#ffd54f"),
             "prayer":   ("🙏", "Prayer",     "#ef5350"),
             "notes":    ("📝", "Notes",      "#ff7043"),
+            "systematics": ("📚", "Theology", "#7e57c2"),
         }
         self._sidebar_buttons = {}    # key -> (icon_row, icon_btn, label_btn)
         self._sidebar_indicators = {} # key -> indicator Box
@@ -833,6 +858,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self._build_bible_tab()
         self._build_prayer_tab()
         self._build_notes_tab()
+        self._build_systematics_tab()
 
         # Store page widgets by key
         self._tab_widgets = {key: self.stack.get_child_by_name(key) for key in self._tab_meta}
@@ -1116,6 +1142,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
             .sidebar-indicator-bible    {{ background-color: #ffd54f; }}
             .sidebar-indicator-prayer   {{ background-color: #ef5350; }}
             .sidebar-indicator-notes    {{ background-color: #ff7043; }}
+            .sidebar-indicator-systematics {{ background-color: #7e57c2; }}
             .tab-content {{ background-color: {bg}; padding: 20px; }}
             .card {{
                 background-color: {tab_active};
@@ -1793,6 +1820,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
             "bible":    "📜 Bible",
             "prayer":   "🙏 Prayer",
             "notes":    "📝 Notes",
+            "systematics": "📚 Theology",
         }
 
         # Ensure tab_order contains all keys (handle new tabs added after pref was saved)
@@ -2003,6 +2031,32 @@ X-GNOME-Autostart-enabled=true
             )
         push_btn.connect("clicked", on_push)
         pull_btn.connect("clicked", on_pull)
+
+        spurgeon_notes_sync_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        spurgeon_notes_push_btn = Gtk.Button(label="⬆ Push Spurgeon notes to web")
+        spurgeon_notes_push_btn.add_css_class("sermon-btn")
+        spurgeon_notes_pull_btn = Gtk.Button(label="⬇ Pull Spurgeon notes from web")
+        spurgeon_notes_pull_btn.add_css_class("sermon-btn")
+        spurgeon_notes_sync_row.append(spurgeon_notes_push_btn)
+        spurgeon_notes_sync_row.append(spurgeon_notes_pull_btn)
+        box.append(spurgeon_notes_sync_row)
+
+        def on_spurgeon_notes_push(b):
+            self._spurgeon_notes_push_to_web(
+                web_url_entry.get_text().strip(),
+                web_user_entry.get_text().strip(),
+                web_pass_entry.get_text(),
+                self._web_sync_status,
+            )
+        def on_spurgeon_notes_pull(b):
+            self._spurgeon_notes_pull_from_web(
+                web_url_entry.get_text().strip(),
+                web_user_entry.get_text().strip(),
+                web_pass_entry.get_text(),
+                self._web_sync_status,
+            )
+        spurgeon_notes_push_btn.connect("clicked", on_spurgeon_notes_push)
+        spurgeon_notes_pull_btn.connect("clicked", on_spurgeon_notes_pull)
 
         # ── Web App Admin ──────────────────────────────────────────────────────
         admin_header = Gtk.Label(label="WEB APP ADMIN")
@@ -3298,6 +3352,201 @@ X-GNOME-Autostart-enabled=true
             except Exception:
                 pass
         threading.Thread(target=run, daemon=True).start()
+
+    # ── Systematics Tab ──────────────────────────────────────────────────────
+
+    def _build_systematics_tab(self):
+        self._systematics_date = datetime.date.today()
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.add_css_class("tab-content")
+        box.set_spacing(8)
+
+        title = Gtk.Label(label="A Year in Systematic Theology")
+        title.add_css_class("section-title")
+        title.set_halign(Gtk.Align.START)
+        box.append(title)
+
+        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        toolbar.add_css_class("sermon-toolbar")
+
+        prev_btn = Gtk.Button(label="◀ Prev")
+        prev_btn.add_css_class("sermon-btn")
+        prev_btn.connect("clicked", self._systematics_prev)
+        toolbar.append(prev_btn)
+
+        self.systematics_date_label = Gtk.Label(
+            label=datetime.date.today().strftime("%A, %d %B %Y")
+        )
+        self.systematics_date_label.add_css_class("section-title")
+        self.systematics_date_label.set_hexpand(True)
+        self.systematics_date_label.set_halign(Gtk.Align.CENTER)
+        toolbar.append(self.systematics_date_label)
+
+        next_btn = Gtk.Button(label="Next ▶")
+        next_btn.add_css_class("sermon-btn")
+        next_btn.connect("clicked", self._systematics_next)
+        toolbar.append(next_btn)
+
+        today_btn = Gtk.Button(label="Today")
+        today_btn.add_css_class("sermon-btn")
+        today_btn.connect("clicked", self._systematics_today)
+        toolbar.append(today_btn)
+
+        box.append(toolbar)
+
+        jump_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        jump_toolbar.add_css_class("sermon-toolbar")
+
+        jump_label = Gtk.Label(label="Jump to:")
+        jump_label.add_css_class("section-title")
+        jump_toolbar.append(jump_label)
+
+        division_names = [label for _, label in SYSTEMATICS_DIVISIONS]
+        self._systematics_jump_combo = Gtk.DropDown.new_from_strings(division_names)
+        self._systematics_jump_combo.set_hexpand(True)
+        self._systematics_jump_combo.connect("notify::selected", self._systematics_jump)
+        jump_toolbar.append(self._systematics_jump_combo)
+
+        box.append(jump_toolbar)
+
+        dark = self.theme == "dark"
+        quote_bg = "#16213e" if dark else "#e8eaf2"  # matches web's --header-bg used for .systematics-verse
+
+        self.systematics_buffer = Gtk.TextBuffer()
+        self.systematics_buffer.create_tag("bold", weight=Pango.Weight.BOLD)
+        self.systematics_buffer.create_tag("heading", weight=Pango.Weight.BOLD, scale=1.2)
+        self.systematics_buffer.create_tag("normal")
+        self.systematics_buffer.create_tag("italic", style=Pango.Style.ITALIC)
+        self.systematics_buffer.create_tag(
+            "label", foreground="#7e57c2", weight=Pango.Weight.BOLD, scale=0.85,
+        )
+        self.systematics_buffer.create_tag(
+            "verse",
+            paragraph_background=quote_bg,
+            left_margin=24, right_margin=16,
+            pixels_above_lines=8, pixels_below_lines=8,
+        )
+
+        self.systematics_view = Gtk.TextView(buffer=self.systematics_buffer)
+        self.systematics_view.set_editable(False)
+        self.systematics_view.set_cursor_visible(False)
+        self.systematics_view.set_wrap_mode(Gtk.WrapMode.WORD)
+        self.systematics_view.set_left_margin(12)
+        self.systematics_view.set_right_margin(12)
+        self.systematics_view.set_top_margin(10)
+        self.systematics_view.set_bottom_margin(10)
+        self.systematics_view.add_css_class("reading-text")
+        self.systematics_buffer.set_text("Loading today's reading…")
+
+        box.append(self.systematics_view)
+        scroll.set_child(box)
+
+        self.stack.add_named(scroll, "systematics")
+
+        threading.Thread(target=self._load_systematics, daemon=True).start()
+
+    def _systematics_prev(self, btn):
+        self._systematics_date -= datetime.timedelta(days=1)
+        self._systematics_refresh()
+
+    def _systematics_next(self, btn):
+        self._systematics_date += datetime.timedelta(days=1)
+        self._systematics_refresh()
+
+    def _systematics_today(self, btn):
+        self._systematics_date = datetime.date.today()
+        self._systematics_refresh()
+
+    def _systematics_jump(self, dropdown, pspec):
+        idx = dropdown.get_selected()
+        if idx == Gtk.INVALID_LIST_POSITION or idx >= len(SYSTEMATICS_DIVISIONS):
+            return
+        day, _label = SYSTEMATICS_DIVISIONS[idx]
+        # day-of-year -> month/day via the same fixed non-leap reference year
+        # used by api/systematics.php, then applied to the year currently in view.
+        ref = datetime.date(2025, 1, 1) + datetime.timedelta(days=day - 1)
+        self._systematics_date = datetime.date(self._systematics_date.year, ref.month, ref.day)
+        self._systematics_refresh()
+
+    def _systematics_refresh(self):
+        self.systematics_date_label.set_text(self._systematics_date.strftime("%A, %d %B %Y"))
+        self.systematics_buffer.set_text("Loading…")
+        threading.Thread(target=self._load_systematics, daemon=True).start()
+
+    def _load_systematics(self):
+        date = self._systematics_date
+        if not self.web_url:
+            GLib.idle_add(self._set_systematics, date, None)
+            return
+        try:
+            r = requests.get(
+                _normalize_url(self.web_url) + "/api/systematics.php",
+                params={"date": date.isoformat()},
+                auth=(self.web_user, self.web_pass),
+                timeout=10,
+            )
+            if r.ok:
+                result = r.json()
+            else:
+                result = f"Server returned HTTP {r.status_code}"
+        except Exception as e:
+            result = str(e)
+        GLib.idle_add(self._set_systematics, date, result)
+
+    def _set_systematics(self, date, result):
+        if date != self._systematics_date:
+            return
+        self.systematics_buffer.set_text("")
+        end = self.systematics_buffer.get_end_iter()
+
+        if result is None:
+            self.systematics_buffer.insert_with_tags_by_name(
+                end, "Configure a web app URL in Settings to view this devotional.", "normal"
+            )
+            return
+        if isinstance(result, str):
+            self.systematics_buffer.insert_with_tags_by_name(end, f"Could not load reading: {result}", "normal")
+            return
+        if not result.get("available"):
+            day = result.get("day", "?")
+            self.systematics_buffer.insert_with_tags_by_name(
+                end, f"Day {day} — this devotional hasn't been written yet.", "normal"
+            )
+            return
+
+        sections = result.get("sections", {})
+        end = self.systematics_buffer.get_end_iter()
+        self.systematics_buffer.insert_with_tags_by_name(end, result.get("section", "").upper() + "\n", "label")
+        end = self.systematics_buffer.get_end_iter()
+        self.systematics_buffer.insert_with_tags_by_name(end, result.get("title", "") + "\n\n", "heading")
+
+        for key in ["Verse", "Explanation", "Prayer", "Reflection Question"]:
+            body = sections.get(key)
+            if not body:
+                continue
+            end = self.systematics_buffer.get_end_iter()
+            self.systematics_buffer.insert_with_tags_by_name(end, key.upper() + "\n", "label")
+            self._systematics_insert_body(body, extra_tag="verse" if key == "Verse" else None)
+            end = self.systematics_buffer.get_end_iter()
+            self.systematics_buffer.insert(end, "\n\n")
+
+    def _systematics_insert_body(self, text, extra_tag=None):
+        """Insert plain text, rendering *word* spans in italics."""
+        import re
+        extras = [extra_tag] if extra_tag else []
+        pos = 0
+        for m in re.finditer(r'\*(.+?)\*', text):
+            end = self.systematics_buffer.get_end_iter()
+            self.systematics_buffer.insert_with_tags_by_name(end, text[pos:m.start()], *extras, "normal")
+            end = self.systematics_buffer.get_end_iter()
+            self.systematics_buffer.insert_with_tags_by_name(end, m.group(1), *extras, "italic")
+            pos = m.end()
+        end = self.systematics_buffer.get_end_iter()
+        self.systematics_buffer.insert_with_tags_by_name(end, text[pos:], *extras, "normal")
 
     # ── News Tab ──────────────────────────────────────────────────────────────
 
@@ -4682,6 +4931,61 @@ X-GNOME-Autostart-enabled=true
         with open(self._notes_file, "w") as f:
             f.write(text)
         return False
+
+    def _spurgeon_notes_push_to_web(self, url, user, password, status_lbl):
+        if not url:
+            GLib.idle_add(status_lbl.set_text, "❌ No web app URL configured in settings.")
+            return
+        try:
+            with open(self._spurgeon_notes_file) as f:
+                notes = json.load(f)
+        except Exception:
+            notes = {}
+        GLib.idle_add(status_lbl.set_text, "Pushing Spurgeon notes…")
+        def run():
+            try:
+                r = requests.post(
+                    _normalize_url(url) + "/api/spurgeon_notes.php",
+                    json={"all": notes},
+                    auth=(user, password),
+                    timeout=10,
+                )
+                if r.ok:
+                    GLib.idle_add(status_lbl.set_text, "✅ Spurgeon notes pushed to web app.")
+                else:
+                    GLib.idle_add(status_lbl.set_text, f"❌ Server returned {r.status_code}.")
+            except Exception as e:
+                GLib.idle_add(status_lbl.set_text, f"❌ {e}")
+        threading.Thread(target=run, daemon=True).start()
+
+    def _spurgeon_notes_pull_from_web(self, url, user, password, status_lbl):
+        if not url:
+            GLib.idle_add(status_lbl.set_text, "❌ No web app URL configured in settings.")
+            return
+        GLib.idle_add(status_lbl.set_text, "Pulling Spurgeon notes…")
+        def run():
+            try:
+                r = requests.get(
+                    _normalize_url(url) + "/api/spurgeon_notes.php",
+                    params={"all": 1},
+                    auth=(user, password),
+                    timeout=10,
+                )
+                if r.ok:
+                    notes = r.json().get("notes", {})
+                    GLib.idle_add(self._spurgeon_notes_apply_pulled, notes)
+                    GLib.idle_add(status_lbl.set_text, "✅ Spurgeon notes pulled from web app.")
+                else:
+                    GLib.idle_add(status_lbl.set_text, f"❌ Server returned {r.status_code}.")
+            except Exception as e:
+                GLib.idle_add(status_lbl.set_text, f"❌ {e}")
+        threading.Thread(target=run, daemon=True).start()
+
+    def _spurgeon_notes_apply_pulled(self, notes):
+        os.makedirs(os.path.dirname(self._spurgeon_notes_file), exist_ok=True)
+        with open(self._spurgeon_notes_file, "w") as f:
+            json.dump(notes, f, indent=2)
+        self._spurgeon_notes_load()
 
 # ── App entry point ───────────────────────────────────────────────────────────
 

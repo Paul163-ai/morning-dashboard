@@ -1,15 +1,16 @@
 /* ── Morning Dashboard — app.js ──────────────────────────────────── */
 
-const ALL_TABS = ['spurgeon','news','weather','bible','prayer','notes','sermons'];
+const ALL_TABS = ['spurgeon','systematics','news','weather','bible','prayer','notes','sermons'];
 
 const TAB_META = {
-    spurgeon: { emoji: '📖', label: 'Devotional', accent: '#f0a500' },
-    news:     { emoji: '📰', label: 'News',       accent: '#4a9eff' },
-    weather:  { emoji: '🌤️', label: 'Weather',    accent: '#00bcd4' },
-    sermons:  { emoji: '✍️', label: 'Sermons',    accent: '#66bb6a' },
-    bible:    { emoji: '📜', label: 'Bible',      accent: '#ffd54f' },
-    prayer:   { emoji: '🙏', label: 'Prayer',     accent: '#ef5350' },
-    notes:    { emoji: '📝', label: 'Notes',      accent: '#ff7043' },
+    spurgeon:     { emoji: '📖', label: 'Devotional',  accent: '#f0a500' },
+    systematics:  { emoji: '📚', label: 'Theology',    accent: '#7e57c2' },
+    news:         { emoji: '📰', label: 'News',        accent: '#4a9eff' },
+    weather:      { emoji: '🌤️', label: 'Weather',     accent: '#00bcd4' },
+    sermons:      { emoji: '✍️', label: 'Sermons',     accent: '#66bb6a' },
+    bible:        { emoji: '📜', label: 'Bible',       accent: '#ffd54f' },
+    prayer:       { emoji: '🙏', label: 'Prayer',      accent: '#ef5350' },
+    notes:        { emoji: '📝', label: 'Notes',       accent: '#ff7043' },
 };
 
 const BIBLE_BOOKS = [
@@ -80,6 +81,10 @@ let notesTimer = null;
 
 // Sermons state
 let currentSermonFile = null;
+
+// Systematics state
+let systematicsDate = new Date();
+systematicsDate.setHours(0,0,0,0);
 
 /* ── Helpers ───────────────────────────────────────────────────────── */
 function dateToISO(d) {
@@ -215,6 +220,7 @@ function loadTab(key) {
         case 'prayer':   initPrayer();   break;
         case 'notes':    initNotes();    break;
         case 'sermons':  initSermons();  break;
+        case 'systematics': initSystematics(); break;
     }
 }
 
@@ -626,6 +632,119 @@ function openBibleRef(bookIdx, chapter) {
         applyBibleState();
         loadBibleChapter();
     }
+}
+
+// The seven divisions of the year (plus the Day 365 capstone), from
+// Systematics/365-outline.md — each entry is the day-of-year its division
+// begins on. Kept as a small static list rather than parsed at runtime,
+// same pattern as the day files themselves.
+const SYSTEMATICS_DIVISIONS = [
+    { day: 1,   label: 'The Doctrine of the Word of God' },
+    { day: 29,  label: 'The Doctrine of God' },
+    { day: 99,  label: 'The Doctrine of Man' },
+    { day: 127, label: 'The Doctrines of Christ and the Holy Spirit' },
+    { day: 183, label: 'The Application of Redemption' },
+    { day: 246, label: 'The Doctrine of the Church' },
+    { day: 316, label: 'The Doctrine of the Future' },
+    { day: 365, label: 'Capstone' },
+];
+
+/* ── SYSTEMATICS TAB ───────────────────────────────────────────────── */
+function initSystematics() {
+    const panel = document.getElementById('tab-systematics');
+    panel.innerHTML = `
+    <div class="systematics-pane">
+      <div class="section-title">A Year in Systematic Theology</div>
+      <div class="sermon-toolbar">
+        <button class="sermon-btn" id="sys-prev">◀ Prev</button>
+        <span class="section-title flex-1" style="text-align:center" id="sys-date-lbl"></span>
+        <button class="sermon-btn" id="sys-next">Next ▶</button>
+        <button class="sermon-btn" id="sys-today">Today</button>
+      </div>
+      <div class="sermon-toolbar">
+        <select class="bible-select flex-1" id="sys-jump-select">
+          <option value="" disabled selected>Jump to a section…</option>
+          ${SYSTEMATICS_DIVISIONS.map(d => `<option value="${d.day}">${escapeHtml(d.label)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="systematics-reading-scroll">
+        <div id="systematics-reading"><span class="status-label">Loading today's reading…</span></div>
+      </div>
+    </div>`;
+
+    document.getElementById('sys-prev').onclick  = () => systematicsNav(-1);
+    document.getElementById('sys-next').onclick  = () => systematicsNav(+1);
+    document.getElementById('sys-today').onclick = () => { systematicsDate = new Date(); systematicsDate.setHours(0,0,0,0); systematicsRefresh(); };
+    document.getElementById('sys-jump-select').onchange = (e) => {
+        const day = parseInt(e.target.value);
+        if (day) systematicsJumpToDay(day);
+    };
+
+    systematicsRefresh();
+}
+
+// Converts a day-of-year (1-365) to a Date in the year currently being
+// viewed, using the same fixed non-leap reference as api/systematics.php's
+// mapping in the other direction.
+function systematicsJumpToDay(day) {
+    const ref = new Date(2025, 0, day);
+    const target = new Date(systematicsDate.getFullYear(), ref.getMonth(), ref.getDate());
+    target.setHours(0, 0, 0, 0);
+    systematicsDate = target;
+    systematicsRefresh();
+}
+
+function systematicsNav(delta) {
+    systematicsDate = new Date(systematicsDate.getTime() + delta * 86400000);
+    systematicsRefresh();
+}
+
+function systematicsRefresh() {
+    document.getElementById('sys-date-lbl').textContent = formatDateFull(systematicsDate);
+    document.getElementById('systematics-reading').innerHTML = '<span class="status-label">Loading…</span>';
+    loadSystematics();
+}
+
+async function loadSystematics() {
+    const requestedDate = systematicsDate;
+    try {
+        const data = await api('systematics.php?date=' + dateToISO(requestedDate));
+        if (requestedDate.getTime() !== systematicsDate.getTime()) return; // user navigated away
+        renderSystematics(data);
+    } catch (e) {
+        if (requestedDate.getTime() !== systematicsDate.getTime()) return;
+        document.getElementById('systematics-reading').textContent = 'Could not load reading: ' + e.message;
+    }
+}
+
+function renderSystematics(data) {
+    const container = document.getElementById('systematics-reading');
+    if (!data.available) {
+        container.innerHTML = `<span class="status-label">Day ${data.day} — this devotional hasn't been written yet.</span>`;
+        return;
+    }
+    const s = data.sections || {};
+    let html = `<div class="section-heading">${escapeHtml(data.section || '')}</div>
+                <h2 class="systematics-title">${escapeHtml(data.title || '')}</h2>`;
+    if (s['Verse']) {
+        html += `<blockquote class="systematics-verse">${systematicsLiteToHtml(s['Verse'])}</blockquote>`;
+    }
+    ['Explanation', 'Prayer', 'Reflection Question'].forEach(key => {
+        if (s[key]) {
+            html += `<div class="systematics-section"><div class="section-heading">${escapeHtml(key)}</div>${systematicsLiteToHtml(s[key])}</div>`;
+        }
+    });
+    container.innerHTML = html;
+}
+
+// The devotional Markdown only ever uses blank-line paragraphs and *italic*
+// spans, so a tiny hand-rolled converter is enough — no Markdown library needed.
+function systematicsLiteToHtml(text) {
+    return text.split(/\n\s*\n/).map(para => {
+        let html = escapeHtml(para.replace(/\s+/g, ' ').trim());
+        html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        return `<p>${html}</p>`;
+    }).join('');
 }
 
 /* ── NEWS TAB ──────────────────────────────────────────────────────── */

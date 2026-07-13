@@ -9,9 +9,9 @@ if ($guest) {
     record_guest_visit($_SERVER['REMOTE_ADDR'] ?? 'unknown');
     $theme             = 'light';
     $font_size         = 13;
-    $all_tabs          = ['spurgeon', 'bible'];
-    $tab_order         = ['spurgeon', 'bible'];
-    $visible_tabs      = ['spurgeon', 'bible'];
+    $all_tabs          = ['spurgeon', 'systematics', 'bible'];
+    $tab_order         = $all_tabs;
+    $visible_tabs      = $all_tabs;
     $sidebar_collapsed = false;
 } else {
     $prefs_file = user_data_dir() . '/prefs.json';
@@ -20,14 +20,21 @@ if ($guest) {
     }
     $theme            = $prefs['theme']            ?? 'dark';
     $font_size        = (int)($prefs['font_size']  ?? 13);
-    $all_tabs         = ['spurgeon','prayer','news','bible','weather','notes','sermons'];
+    $all_tabs         = ['spurgeon','systematics','prayer','news','bible','weather','notes','sermons'];
     $tab_order        = $prefs['tab_order']        ?? $all_tabs;
     $visible_tabs     = $prefs['visible_tabs']     ?? $all_tabs;
     $sidebar_collapsed = (bool)($prefs['sidebar_collapsed'] ?? false);
 
-    // Ensure all tabs are represented in tab_order
-    foreach ($all_tabs as $t) {
-        if (!in_array($t, $tab_order)) $tab_order[] = $t;
+    // Ensure all tabs are represented in tab_order. Newly-introduced tabs are
+    // inserted at their canonical position from $all_tabs (not just appended
+    // at the end) and made visible by default, so a brand-new tab shows up
+    // in the right place for existing users without them having to visit
+    // Settings first.
+    foreach ($all_tabs as $idx => $t) {
+        if (!in_array($t, $tab_order)) {
+            array_splice($tab_order, min($idx, count($tab_order)), 0, [$t]);
+            if (!in_array($t, $visible_tabs)) $visible_tabs[] = $t;
+        }
     }
 }
 

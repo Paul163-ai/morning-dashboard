@@ -178,7 +178,7 @@ function require_auth(): void {
 
     // Allow guest (logged-out) access to the read-only devotional reading,
     // used by the public view shown on index.php for unauthenticated visitors.
-    if (in_array($script, ['spurgeon.php', 'spurgeon_modern.php', 'bible.php']) && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') return;
+    if (in_array($script, ['spurgeon.php', 'spurgeon_modern.php', 'bible.php', 'systematics.php']) && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') return;
 
     if (_is_api_request()) {
         if (!headers_sent()) header('Content-Type: application/json; charset=utf-8');
