@@ -3361,9 +3361,16 @@ X-GNOME-Autostart-enabled=true
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
+        # Centred column (mirrors web's .systematics-pane max-width:800px;margin:0 auto)
+        clamp = Gtk.CenterBox()
+        clamp.set_hexpand(True)
+
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         box.add_css_class("tab-content")
         box.set_spacing(8)
+        box.set_halign(Gtk.Align.CENTER)
+        box.set_hexpand(False)
+        box.set_size_request(800, -1)
 
         title = Gtk.Label(label="A Year in Systematic Theology")
         title.add_css_class("section-title")
@@ -3443,7 +3450,8 @@ X-GNOME-Autostart-enabled=true
         self.systematics_buffer.set_text("Loading today's reading…")
 
         box.append(self.systematics_view)
-        scroll.set_child(box)
+        clamp.set_center_widget(box)
+        scroll.set_child(clamp)
 
         self.stack.add_named(scroll, "systematics")
 
