@@ -77,6 +77,100 @@ function invalidate_remember_token(string $token): void {
     }
 }
 
+// --- Password reset tokens ---
+
+const PASSWORD_RESET_DURATION = 3600; // 1 hour
+
+function _password_resets_file(): string {
+    return __DIR__ . '/data/password_resets.json';
+}
+
+function create_password_reset_token(string $username): string {
+    $token  = bin2hex(random_bytes(32));
+    $file   = _password_resets_file();
+    $tokens = file_exists($file) ? (json_decode(file_get_contents($file), true) ?: []) : [];
+    $now    = time();
+    foreach ($tokens as $t => $d) {
+        if ($d['expires'] < $now) unset($tokens[$t]);
+    }
+    $tokens[$token] = ['user' => $username, 'expires' => $now + PASSWORD_RESET_DURATION, 'used' => false];
+    file_put_contents($file, json_encode($tokens), LOCK_EX);
+    return $token;
+}
+
+function validate_password_reset_token(string $token): ?string {
+    $file = _password_resets_file();
+    if (!file_exists($file)) return null;
+    $tokens = json_decode(file_get_contents($file), true) ?: [];
+    $data   = $tokens[$token] ?? null;
+    if (!$data || !empty($data['used']) || $data['expires'] < time()) return null;
+    return preg_replace('/[^a-zA-Z0-9_\-]/', '', $data['user'] ?? '') ?: null;
+}
+
+function invalidate_password_reset_token(string $token): void {
+    $file = _password_resets_file();
+    if (!file_exists($file)) return;
+    $tokens = json_decode(file_get_contents($file), true) ?: [];
+    if (isset($tokens[$token])) {
+        $tokens[$token]['used'] = true;
+        file_put_contents($file, json_encode($tokens), LOCK_EX);
+    }
+}
+
+function invalidate_all_remember_tokens_for_user(string $username): void {
+    $file = _remember_tokens_file();
+    if (!file_exists($file)) return;
+    $tokens = json_decode(file_get_contents($file), true) ?: [];
+    $changed = false;
+    foreach ($tokens as $t => $d) {
+        if (($d['user'] ?? '') === $username) { unset($tokens[$t]); $changed = true; }
+    }
+    if ($changed) file_put_contents($file, json_encode($tokens), LOCK_EX);
+}
+
+// --- Per-user email addresses ---
+
+function _user_emails_file(): string {
+    return __DIR__ . '/data/user_emails.json';
+}
+
+function get_user_email(string $username): ?string {
+    $file = _user_emails_file();
+    if (!file_exists($file)) return null;
+    $emails = json_decode(file_get_contents($file), true) ?: [];
+    return $emails[$username] ?? null;
+}
+
+function set_user_email(string $username, string $email): void {
+    $file   = _user_emails_file();
+    $emails = file_exists($file) ? (json_decode(file_get_contents($file), true) ?: []) : [];
+    $emails[$username] = $email;
+    file_put_contents($file, json_encode($emails, JSON_PRETTY_PRINT), LOCK_EX);
+}
+
+function find_username_by_email(string $email): ?string {
+    $file = _user_emails_file();
+    if (!file_exists($file)) return null;
+    $emails = json_decode(file_get_contents($file), true) ?: [];
+    foreach ($emails as $username => $stored) {
+        if (strcasecmp($stored, $email) === 0) return $username;
+    }
+    return null;
+}
+
+// --- Rate limiting (by IP, used by request.php / forgot_password.php) ---
+
+function check_rate_limit(string $file, string $ip, int $max = 3, int $window = 3600): bool {
+    $data = file_exists($file) ? (json_decode(file_get_contents($file), true) ?: []) : [];
+    $now  = time();
+    $data = array_filter($data, fn($t) => ($now - $t) < $window);
+    $ip_entries = array_filter($data, fn($t, $k) => $k === $ip || str_starts_with($k, $ip . '_'), ARRAY_FILTER_USE_BOTH);
+    if (count($ip_entries) >= $max) return false;
+    $data[$ip . '_' . $now] = $now;
+    file_put_contents($file, json_encode($data), LOCK_EX);
+    return true;
+}
+
 // --- Login log ---
 
 function log_login_event(string $user, string $ip, string $method, bool $ok): void {
@@ -174,7 +268,7 @@ function require_auth(): void {
 
     // Not authenticated
     $script = basename($_SERVER['SCRIPT_FILENAME'] ?? '');
-    if (in_array($script, ['login.php', 'request.php', 'setup.php', 'index.php'])) return;
+    if (in_array($script, ['login.php', 'request.php', 'setup.php', 'index.php', 'forgot_password.php', 'reset_password.php'])) return;
 
     // Allow guest (logged-out) access to the read-only devotional reading,
     // used by the public view shown on index.php for unauthenticated visitors.

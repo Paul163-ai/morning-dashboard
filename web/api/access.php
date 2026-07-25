@@ -22,6 +22,24 @@ if ($action === 'change_password') {
     exit;
 }
 
+// set_email is available to any logged-in user for their own account;
+// the admin may also target another user by passing "username".
+if ($action === 'set_email') {
+    $target = current_user();
+    if (current_user() === ADMIN_USER && !empty($body['username'])) {
+        $target = preg_replace('/[^a-zA-Z0-9_\-]/', '', $body['username']);
+    }
+    $email = trim($body['email'] ?? '');
+    if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Please enter a valid email address.']);
+        exit;
+    }
+    set_user_email($target, $email);
+    echo json_encode(['ok' => true]);
+    exit;
+}
+
 // All other actions are admin-only
 if (current_user() !== ADMIN_USER) {
     http_response_code(403);
@@ -63,7 +81,11 @@ if ($action === 'list') {
         }
     }
 
-    $users = array_map(fn($u) => ['username' => $u, 'last_login' => $last_logins[$u] ?? null], $usernames);
+    $users = array_map(fn($u) => [
+        'username'   => $u,
+        'last_login' => $last_logins[$u] ?? null,
+        'email'      => get_user_email($u) ?? '',
+    ], $usernames);
     echo json_encode(['users' => $users]);
 
 } elseif ($action === 'approve') {
@@ -73,9 +95,11 @@ if ($action === 'list') {
     // Find the pending request to check for a pre-hashed password
     $requests     = load_requests($requests_file);
     $stored_hash  = null;
+    $stored_email = null;
     foreach ($requests as $r) {
         if ($r['username'] === $username && $r['status'] === 'pending') {
-            $stored_hash = $r['password_hash'] ?? null;
+            $stored_hash  = $r['password_hash'] ?? null;
+            $stored_email = $r['email'] ?? null;
             break;
         }
     }
@@ -102,6 +126,7 @@ if ($action === 'list') {
         }
     }
     save_requests($requests_file, $requests);
+    if ($stored_email) set_user_email($username, $stored_email);
     $result = ['ok' => true, 'username' => $username, 'user_set_password' => (bool)$stored_hash];
     if ($response_password) $result['password'] = $response_password;
     echo json_encode($result);
@@ -116,6 +141,24 @@ if ($action === 'list') {
     }
     save_requests($requests_file, $requests);
     echo json_encode(['ok' => true]);
+
+} elseif ($action === 'reset_password') {
+    $username = preg_replace('/[^a-zA-Z0-9_\-]/', '', $body['username'] ?? '');
+    if (!$username) { http_response_code(400); echo json_encode(['error' => 'No username']); exit; }
+
+    $lines = read_htpasswd_lines();
+    $exists = false;
+    foreach ($lines as $line) {
+        if (str_starts_with($line, $username . ':')) { $exists = true; break; }
+    }
+    if (!$exists) { http_response_code(400); echo json_encode(['error' => 'No such user']); exit; }
+
+    $new_password = substr(str_replace(['+','/','='], '', base64_encode(random_bytes(16))), 0, 16);
+    if (!write_htpasswd(HTPASSWD_FILE, $username, $new_password)) {
+        echo json_encode(['error' => 'Could not write to .htpasswd — check the path in config.php']);
+        exit;
+    }
+    echo json_encode(['ok' => true, 'username' => $username, 'password' => $new_password]);
 
 } elseif ($action === 'delete_user') {
     $username = preg_replace('/[^a-zA-Z0-9_\-]/', '', $body['username'] ?? '');
@@ -140,6 +183,16 @@ if ($action === 'list') {
             $file->isDir() ? rmdir($file->getRealPath()) : unlink($file->getRealPath());
         }
         rmdir($user_dir);
+    }
+
+    // Remove any stored email
+    $emails_file = __DIR__ . '/../data/user_emails.json';
+    if (file_exists($emails_file)) {
+        $emails = json_decode(file_get_contents($emails_file), true) ?: [];
+        if (array_key_exists($username, $emails)) {
+            unset($emails[$username]);
+            file_put_contents($emails_file, json_encode($emails, JSON_PRETTY_PRINT), LOCK_EX);
+        }
     }
 
     echo json_encode(['ok' => true]);

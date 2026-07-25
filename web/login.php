@@ -42,6 +42,7 @@ function _clear_failed_attempts(string $ip): void {
 $ip      = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
 $locked  = _login_attempts($ip) >= LOGIN_MAX_ATTEMPTS;
 $error   = $locked ? 'Too many failed attempts — try again in 15 minutes.' : '';
+$reset   = ($_GET['reset'] ?? '') === '1';
 
 if (!$locked && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $username = trim($_POST['username'] ?? '');
@@ -162,6 +163,15 @@ if (!$locked && $_SERVER['REQUEST_METHOD'] === 'POST') {
             color: #ff8099;
             margin-bottom: 1rem;
         }
+        .success {
+            background: rgba(102, 187, 106, 0.15);
+            border: 1px solid rgba(102, 187, 106, 0.4);
+            border-radius: 6px;
+            padding: 0.6rem 0.75rem;
+            font-size: 0.9rem;
+            color: #a5d6a7;
+            margin-bottom: 1rem;
+        }
         .request-link {
             text-align: center;
             margin-top: 1.25rem;
@@ -191,6 +201,9 @@ if (!$locked && $_SERVER['REQUEST_METHOD'] === 'POST') {
 <body>
 <div class="card">
     <div class="title">☀️ Morning Dashboard</div>
+    <?php if ($reset): ?>
+    <div class="success">Password updated — log in with your new password.</div>
+    <?php endif; ?>
     <?php if ($error): ?>
     <div class="error"><?= htmlspecialchars($error) ?></div>
     <?php endif; ?>
@@ -210,7 +223,10 @@ if (!$locked && $_SERVER['REQUEST_METHOD'] === 'POST') {
         </label>
         <button type="submit" class="btn" <?= $locked ? 'disabled' : '' ?>>Log in</button>
     </form>
-    <div class="request-link">New here? You'll need an account first — <a href="/request.php">Request access</a></div>
+    <div class="request-link">
+        Forgot your password? <a href="/forgot_password.php">Reset it</a>.<br>
+        New here? You'll need an account first — <a href="/request.php">Request access</a>
+    </div>
     <a class="guest-link" href="/">Continue without logging in</a>
 </div>
 </body>

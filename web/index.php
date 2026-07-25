@@ -9,7 +9,7 @@ if ($guest) {
     record_guest_visit($_SERVER['REMOTE_ADDR'] ?? 'unknown');
     $theme             = 'light';
     $font_size         = 13;
-    $all_tabs          = ['spurgeon', 'systematics', 'bible'];
+    $all_tabs          = ['spurgeon', 'systematics', 'bible', 'resources'];
     $tab_order         = $all_tabs;
     $visible_tabs      = $all_tabs;
     $sidebar_collapsed = false;
@@ -20,7 +20,7 @@ if ($guest) {
     }
     $theme            = $prefs['theme']            ?? 'dark';
     $font_size        = (int)($prefs['font_size']  ?? 13);
-    $all_tabs         = ['spurgeon','systematics','prayer','news','bible','weather','notes','sermons'];
+    $all_tabs         = ['spurgeon','systematics','prayer','news','bible','weather','notes','sermons','resources'];
     $tab_order        = $prefs['tab_order']        ?? $all_tabs;
     $visible_tabs     = $prefs['visible_tabs']     ?? $all_tabs;
     $sidebar_collapsed = (bool)($prefs['sidebar_collapsed'] ?? false);
@@ -48,6 +48,7 @@ $init_prefs = json_encode([
     'weather_lat'       => $prefs['weather_lat']      ?? null,
     'weather_lon'       => $prefs['weather_lon']      ?? null,
     'api_bible_key_set' => !empty($prefs['api_bible_key']),
+    'user_email'        => $guest ? '' : (get_user_email($username) ?? ''),
 ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE);
 ?>
 <!DOCTYPE html>

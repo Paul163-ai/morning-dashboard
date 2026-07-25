@@ -48,18 +48,6 @@ $message      = '';
 $message_type = '';
 $submitted    = false;
 
-function check_rate_limit(string $file, string $ip, int $max = 3, int $window = 3600): bool {
-    $data = file_exists($file) ? (json_decode(file_get_contents($file), true) ?: []) : [];
-    $now  = time();
-    // Clean old entries
-    $data = array_filter($data, fn($t) => ($now - $t) < $window);
-    $ip_entries = array_filter($data, fn($t, $k) => $k === $ip || str_starts_with($k, $ip . '_'), ARRAY_FILTER_USE_BOTH);
-    if (count($ip_entries) >= $max) return false;
-    $data[$ip . '_' . $now] = $now;
-    file_put_contents($file, json_encode($data));
-    return true;
-}
-
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
     if (!check_rate_limit($rate_limit_file, $ip)) {
@@ -77,7 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$username || !$name) {
         $message = 'Please fill in your username and name.';
         $message_type = 'error';
-    } elseif ($email && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+    } elseif (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $message = 'Please enter a valid email address.';
         $message_type = 'error';
     } elseif (strlen($password) < 8) {
@@ -153,8 +141,8 @@ render:
             <input type="text" id="name" name="name" required maxlength="100"
                    value="<?= htmlspecialchars($_POST['name'] ?? '') ?>">
 
-            <label for="email">Your email (optional)</label>
-            <input type="email" id="email" name="email" maxlength="200"
+            <label for="email">Your email</label>
+            <input type="email" id="email" name="email" required maxlength="200"
                    value="<?= htmlspecialchars($_POST['email'] ?? '') ?>">
 
             <label for="reason">Why would you like access? (optional)</label>

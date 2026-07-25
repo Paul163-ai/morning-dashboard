@@ -485,6 +485,50 @@ body.guest #content { padding-bottom: calc(40px + env(safe-area-inset-bottom, 0p
     margin-bottom: 4px;
 }
 
+/* ── Resources Tab ─────────────────────────────────────────────────── */
+.resources-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    padding: 16px;
+    max-width: 800px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+.resources-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.resource-card {
+    display: block;
+    background: var(--input-bg);
+    border-radius: 8px;
+    padding: 14px 16px;
+    text-decoration: none;
+    transition: background 0.15s;
+}
+
+.resource-card:hover {
+    background: var(--tab-active);
+}
+
+.resource-card-title {
+    color: var(--text);
+    font-weight: bold;
+    font-size: var(--font-size);
+}
+
+.resource-card-desc {
+    color: var(--subtext);
+    font-size: calc(var(--font-size) - 1px);
+    margin-top: 4px;
+}
+
 .systematics-title {
     color: var(--text);
     margin: 0 0 16px 0;

@@ -15,41 +15,49 @@ function save_comments(string $file, array $data): void {
     file_put_contents($file, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
 }
 
+// Spurgeon's Morning & Evening repeats on the same month-day every year, so
+// comments are keyed by month-day (not full date) and accumulate across years.
+function md_key(string $date): string {
+    return substr($date, 5, 5);
+}
+
 $user   = current_user();
 $method = $_SERVER['REQUEST_METHOD'];
 
 if ($method === 'GET') {
-    $date = preg_replace('/[^0-9\-]/', '', $_GET['date'] ?? date('Y-m-d'));
+    $key  = md_key(preg_replace('/[^0-9\-]/', '', $_GET['date'] ?? date('Y-m-d')));
     $data = load_comments($comments_file);
-    echo json_encode(['comments' => array_values($data[$date] ?? [])]);
+    $comments = $data[$key] ?? [];
+    usort($comments, fn($a, $b) => $a['timestamp'] <=> $b['timestamp']);
+    echo json_encode(['comments' => array_values($comments)]);
 
 } elseif ($method === 'POST') {
     $body = json_decode(file_get_contents('php://input'), true);
-    $date = preg_replace('/[^0-9\-]/', '', $body['date'] ?? date('Y-m-d'));
+    $key  = md_key(preg_replace('/[^0-9\-]/', '', $body['date'] ?? date('Y-m-d')));
     $text = substr(trim($body['text'] ?? ''), 0, 8000);
     if ($text === '') { http_response_code(400); echo json_encode(['error' => 'empty']); exit; }
 
     $data = load_comments($comments_file);
-    if (!isset($data[$date])) $data[$date] = [];
+    if (!isset($data[$key])) $data[$key] = [];
     $comment = [
         'id'        => bin2hex(random_bytes(8)),
         'username'  => $user,
         'text'      => $text,
         'timestamp' => time(),
     ];
-    $data[$date][] = $comment;
+    $data[$key][] = $comment;
     save_comments($comments_file, $data);
     echo json_encode(['ok' => true, 'comment' => $comment]);
 
 } elseif ($method === 'DELETE') {
     $body = json_decode(file_get_contents('php://input'), true);
-    $date = preg_replace('/[^0-9\-]/', '', $body['date'] ?? '');
-    $id   = preg_replace('/[^a-f0-9]/', '', $body['id']   ?? '');
+    $key = md_key(preg_replace('/[^0-9\-]/', '', $body['date'] ?? ''));
+    $id  = preg_replace('/[^a-f0-9]/', '', $body['id']   ?? '');
 
     $data = load_comments($comments_file);
-    if (!isset($data[$date])) { echo json_encode(['ok' => true]); exit; }
+    if (!isset($data[$key])) { echo json_encode(['ok' => true]); exit; }
 
-    $data[$date] = array_values(array_filter($data[$date], function ($c) use ($id, $user) {
+    $data[$key] = array_values(array_filter($data[$key], function ($c) use ($id, $user) {
         if ($c['id'] !== $id) return true;
         return !($c['username'] === $user || $user === ADMIN_USER);
     }));

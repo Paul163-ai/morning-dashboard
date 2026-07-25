@@ -1,6 +1,6 @@
 /* ── Morning Dashboard — app.js ──────────────────────────────────── */
 
-const ALL_TABS = ['spurgeon','systematics','news','weather','bible','prayer','notes','sermons'];
+const ALL_TABS = ['spurgeon','systematics','news','weather','bible','prayer','notes','sermons','resources'];
 
 const TAB_META = {
     spurgeon:     { emoji: '📖', label: 'Devotional',  accent: '#f0a500' },
@@ -11,7 +11,13 @@ const TAB_META = {
     bible:        { emoji: '📜', label: 'Bible',       accent: '#ffd54f' },
     prayer:       { emoji: '🙏', label: 'Prayer',      accent: '#ef5350' },
     notes:        { emoji: '📝', label: 'Notes',       accent: '#ff7043' },
+    resources:    { emoji: '🔗', label: 'Resources',   accent: '#8d6e63' },
 };
+
+const RESOURCE_LINKS = [
+    { title: 'John Owen', desc: 'Writings and resources on John Owen', url: 'https://paullintott.uk/john-owen' },
+    { title: 'John Calvin', desc: 'Writings and resources on John Calvin', url: 'https://paullintott.uk/john-calvin' },
+];
 
 const BIBLE_BOOKS = [
     ['Genesis','GEN',50],['Exodus','EXO',40],['Leviticus','LEV',27],
@@ -221,7 +227,24 @@ function loadTab(key) {
         case 'notes':    initNotes();    break;
         case 'sermons':  initSermons();  break;
         case 'systematics': initSystematics(); break;
+        case 'resources': initResources(); break;
     }
+}
+
+/* ── RESOURCES TAB ─────────────────────────────────────────────────── */
+function initResources() {
+    const panel = document.getElementById('tab-resources');
+    panel.innerHTML = `
+    <div class="resources-pane">
+      <div class="section-title">More Resources</div>
+      <div class="resources-list">
+        ${RESOURCE_LINKS.map(r => `
+          <a class="resource-card" href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer">
+            <div class="resource-card-title">${escapeHtml(r.title)}</div>
+            <div class="resource-card-desc">${escapeHtml(r.desc)}</div>
+          </a>`).join('')}
+      </div>
+    </div>`;
 }
 
 function toggleSidebar() {
@@ -1424,6 +1447,30 @@ function renderSettingsBody() {
     renderSettingsTabs(tabsBox);
     body.appendChild(el('div', { class: 'status-label', style: 'padding:0' }, '(At least one tab must remain visible)'));
 
+    // My email (all users) — used for self-service password reset
+    body.appendChild(el('div', { class: 'settings-section-label' }, 'MY EMAIL'));
+    const emailRow = el('div', { class: 'settings-row' });
+    emailRow.appendChild(el('label', {}, 'Email:'));
+    const emailInp = el('input', { type: 'email', class: 'settings-input flex-1', placeholder: 'you@example.com', value: window.INIT_PREFS.user_email || '' });
+    emailRow.appendChild(emailInp);
+    body.appendChild(emailRow);
+
+    const emailStatus = el('div', { style: 'font-size:12px;min-height:18px' });
+    const emailBtn = el('button', { class: 'sermon-btn', style: 'margin-left:0', onclick: async () => {
+        const email = emailInp.value.trim();
+        try {
+            const res = await api('access.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'set_email', email }),
+            });
+            if (res.error) { emailStatus.style.color='#ef5350'; emailStatus.textContent='❌ ' + res.error; }
+            else { emailStatus.style.color='#66bb6a'; emailStatus.textContent='✅ Email saved.'; window.INIT_PREFS.user_email = email; }
+        } catch(e) { emailStatus.style.color='#ef5350'; emailStatus.textContent='❌ ' + e.message; }
+    } }, 'Save email');
+    body.appendChild(el('div', { class: 'settings-row' }, emailBtn, emailStatus));
+    body.appendChild(el('div', { class: 'status-label', style: 'padding:0' }, 'Used for self-service password reset if you forget your password.'));
+
     // Change password (all users)
     body.appendChild(el('div', { class: 'settings-section-label' }, 'CHANGE PASSWORD'));
     const pwRow1 = el('div', { class: 'settings-row' });
@@ -1602,11 +1649,64 @@ async function loadUserList(container) {
                 ? new Date(u.last_login * 1000).toLocaleString('en-GB', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:false })
                 : null;
             const isAdmin = username === 'paul';
-            const row = el('div', { style: 'display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--header-border)' });
+            const wrap = el('div', { style: 'padding:6px 0;border-bottom:1px solid var(--header-border)' });
+            const row = el('div', { style: 'display:flex;align-items:center;gap:10px' });
+            const resultDiv = el('div', { style: 'margin-top:4px;font-size:12px' });
             const nameLbl = el('span', { style: 'flex:1;font-size:14px' }, username);
             if (isAdmin) nameLbl.appendChild(el('span', { style: 'font-size:11px;color:var(--accent);margin-left:6px' }, '(admin)'));
             if (lastLogin) nameLbl.appendChild(el('span', { style: 'font-size:11px;color:var(--subtext);margin-left:8px' }, 'Last login: ' + lastLogin));
             row.appendChild(nameLbl);
+
+            const emailRow = el('div', { style: 'display:flex;align-items:center;gap:6px;margin-top:4px' });
+            const emailInp = el('input', { type: 'email', class: 'settings-input', style: 'flex:1;font-size:12px;padding:3px 8px',
+                placeholder: 'No email on file', value: (typeof u === 'object' && u.email) ? u.email : '' });
+            const emailStatus = el('span', { style: 'font-size:11px' });
+            const emailBtn = el('button', { class: 'save-btn', style: 'font-size:11px;padding:2px 8px',
+                onclick: async () => {
+                    emailBtn.disabled = true;
+                    try {
+                        const res = await api('access.php', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'set_email', username, email: emailInp.value.trim() }),
+                        });
+                        if (res.error) { emailStatus.style.color = '#ef5350'; emailStatus.textContent = '❌ ' + res.error; }
+                        else { emailStatus.style.color = '#66bb6a'; emailStatus.textContent = '✅ Saved'; }
+                    } catch(e) {
+                        emailStatus.style.color = '#ef5350'; emailStatus.textContent = '❌ ' + e.message;
+                    } finally {
+                        emailBtn.disabled = false;
+                    }
+                }
+            }, 'Save');
+            emailRow.append(el('label', { style: 'font-size:11px;color:var(--subtext)' }, 'Email:'), emailInp, emailBtn, emailStatus);
+
+            const resetBtn = el('button', { class: 'save-btn', style: 'font-size:12px;padding:3px 10px',
+                onclick: async () => {
+                    if (!confirm(`Reset password for "${username}"? A new random password will be generated.`)) return;
+                    resetBtn.disabled = true;
+                    try {
+                        const res = await api('access.php', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'reset_password', username }),
+                        });
+                        if (res.error) {
+                            resultDiv.style.color = '#ef5350';
+                            resultDiv.textContent = '❌ ' + res.error;
+                        } else {
+                            resultDiv.style.color = '#66bb6a';
+                            resultDiv.innerHTML = `✅ New password for <strong>${res.username}</strong>: <strong>${res.password}</strong> &nbsp; <em>(share this once — it won't show again)</em>`;
+                        }
+                    } catch(e) {
+                        resultDiv.style.color = '#ef5350';
+                        resultDiv.textContent = '❌ ' + e.message;
+                    } finally {
+                        resetBtn.disabled = false;
+                    }
+                }
+            }, 'Reset password');
+            row.appendChild(resetBtn);
 
             if (!isAdmin) {
                 const delBtn = el('button', { class: 'cancel-btn', style: 'font-size:12px;padding:3px 10px',
@@ -1624,7 +1724,8 @@ async function loadUserList(container) {
                 }, 'Delete');
                 row.appendChild(delBtn);
             }
-            container.appendChild(row);
+            wrap.append(row, emailRow, resultDiv);
+            container.appendChild(wrap);
         });
     } catch(e) {
         container.textContent = 'Could not load users.';

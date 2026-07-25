@@ -626,7 +626,12 @@ AUTOSTART_FILE = os.path.expanduser("~/.config/autostart/morning-dashboard.deskt
 SPURGEON_CACHE_FILE = os.path.expanduser("~/.config/morning-dashboard/spurgeon_cache.json")
 SPURGEON_ORIGINAL_CACHE_FILE = os.path.expanduser("~/.config/morning-dashboard/spurgeon_original_cache.json")
 
-ALL_TABS = ["spurgeon", "systematics", "news", "weather", "sermons", "calendar", "bible", "prayer", "notes"]
+ALL_TABS = ["spurgeon", "systematics", "news", "weather", "sermons", "calendar", "bible", "prayer", "notes", "resources"]
+
+RESOURCE_LINKS = [
+    ("John Owen", "Writings and resources on John Owen", "https://paullintott.uk/john-owen"),
+    ("John Calvin", "Writings and resources on John Calvin", "https://paullintott.uk/john-calvin"),
+]
 
 def load_prefs():
     defaults = {"font_size": 13, "theme": "dark", "weather_location": "", "weather_country": "GB", "enabled_calendars": [], "visible_tabs": ALL_TABS[:], "tab_order": ALL_TABS[:]}
@@ -846,6 +851,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
             "prayer":   ("🙏", "Prayer",     "#ef5350"),
             "notes":    ("📝", "Notes",      "#ff7043"),
             "systematics": ("📚", "Theology", "#7e57c2"),
+            "resources": ("🔗", "Resources", "#8d6e63"),
         }
         self._sidebar_buttons = {}    # key -> (icon_row, icon_btn, label_btn)
         self._sidebar_indicators = {} # key -> indicator Box
@@ -859,6 +865,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
         self._build_prayer_tab()
         self._build_notes_tab()
         self._build_systematics_tab()
+        self._build_resources_tab()
 
         # Store page widgets by key
         self._tab_widgets = {key: self.stack.get_child_by_name(key) for key in self._tab_meta}
@@ -1143,6 +1150,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
             .sidebar-indicator-prayer   {{ background-color: #ef5350; }}
             .sidebar-indicator-notes    {{ background-color: #ff7043; }}
             .sidebar-indicator-systematics {{ background-color: #7e57c2; }}
+            .sidebar-indicator-resources {{ background-color: #8d6e63; }}
             .tab-content {{ background-color: {bg}; padding: 20px; }}
             .card {{
                 background-color: {tab_active};
@@ -1364,6 +1372,32 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 font-size: {max(fs - 1, 10)}px;
                 color: {subtext};
                 font-style: italic;
+            }}
+            .prayer-cal-banner-gbm {{
+                background-color: {'#12253a' if dark else '#f0f7ff'};
+                border-left: 3px solid #4a9eff;
+                border-radius: 0 6px 6px 0;
+                padding: 8px 14px;
+            }}
+            .prayer-cal-banner-myanmar {{
+                background-color: {'#122a1a' if dark else '#f0fbf3'};
+                border-left: 3px solid #66bb6a;
+                border-radius: 0 6px 6px 0;
+                padding: 8px 14px;
+            }}
+            .prayer-cal-title-gbm {{
+                font-size: {max(fs - 1, 10)}px;
+                font-weight: bold;
+                color: #4a9eff;
+            }}
+            .prayer-cal-title-myanmar {{
+                font-size: {max(fs - 1, 10)}px;
+                font-weight: bold;
+                color: #66bb6a;
+            }}
+            .prayer-cal-entry {{
+                font-size: {fs}px;
+                color: {text};
             }}
             .prefs-box {{
                 background-color: {bg};
@@ -1821,6 +1855,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
             "prayer":   "🙏 Prayer",
             "notes":    "📝 Notes",
             "systematics": "📚 Theology",
+            "resources": "🔗 Resources",
         }
 
         # Ensure tab_order contains all keys (handle new tabs added after pref was saved)
@@ -3556,6 +3591,47 @@ X-GNOME-Autostart-enabled=true
         end = self.systematics_buffer.get_end_iter()
         self.systematics_buffer.insert_with_tags_by_name(end, text[pos:], *extras, "normal")
 
+    # ── Resources Tab ────────────────────────────────────────────────────────
+
+    def _build_resources_tab(self):
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+
+        clamp = Gtk.CenterBox()
+        clamp.set_hexpand(True)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.add_css_class("tab-content")
+        box.set_spacing(12)
+        box.set_halign(Gtk.Align.CENTER)
+        box.set_hexpand(False)
+        box.set_size_request(800, -1)
+
+        title = Gtk.Label(label="More Resources")
+        title.add_css_class("section-title")
+        title.set_halign(Gtk.Align.START)
+        box.append(title)
+
+        for name, desc, url in RESOURCE_LINKS:
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            card.add_css_class("card")
+
+            link = Gtk.LinkButton.new_with_label(url, name)
+            link.set_halign(Gtk.Align.START)
+            card.append(link)
+
+            desc_label = Gtk.Label(label=desc)
+            desc_label.add_css_class("source-label")
+            desc_label.set_halign(Gtk.Align.START)
+            card.append(desc_label)
+
+            box.append(card)
+
+        clamp.set_center_widget(box)
+        scroll.set_child(clamp)
+
+        self.stack.add_named(scroll, "resources")
+
     # ── News Tab ──────────────────────────────────────────────────────────────
 
     def _build_news_tab(self):
@@ -4448,6 +4524,42 @@ X-GNOME-Autostart-enabled=true
             outer.append(diary_banner)
         except Exception:
             pass
+
+        # Monthly mission prayer calendars (e.g. GBM, OMF Myanmar) — one JSON
+        # file per calendar per month: prayer_<name>_YYYY-MM.json. A calendar
+        # simply doesn't appear once its month's file is missing.
+        _today = datetime.date.today()
+        _month_tag = _today.strftime("%Y-%m")
+        for _cal_name, _css_slug, _accent in (
+            ("gbm", "gbm", "#4a9eff"),
+            ("myanmar", "myanmar", "#66bb6a"),
+        ):
+            try:
+                _cal_path = os.path.join(PROJECT_DIR, f"prayer_{_cal_name}_{_month_tag}.json")
+                with open(_cal_path) as _f:
+                    _cal = json.load(_f)
+                _entry = _cal.get("entries", {}).get(str(_today.day), "")
+                if not _entry:
+                    continue
+
+                cal_banner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+                cal_banner.add_css_class(f"prayer-cal-banner-{_css_slug}")
+                cal_banner.set_margin_bottom(4)
+
+                cal_title_lbl = Gtk.Label(label=_cal.get("title", _cal_name))
+                cal_title_lbl.add_css_class(f"prayer-cal-title-{_css_slug}")
+                cal_title_lbl.set_halign(Gtk.Align.START)
+                cal_banner.append(cal_title_lbl)
+
+                cal_entry_lbl = Gtk.Label(label=_entry)
+                cal_entry_lbl.add_css_class("prayer-cal-entry")
+                cal_entry_lbl.set_halign(Gtk.Align.START)
+                cal_entry_lbl.set_wrap(True)
+                cal_banner.append(cal_entry_lbl)
+
+                outer.append(cal_banner)
+            except Exception:
+                pass
 
         # Add new prayer row
         add_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
