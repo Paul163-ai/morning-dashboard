@@ -229,6 +229,51 @@ BIBLE_BOOKS = [
     ("Revelation","REV",22),
 ]
 
+def _resolve_bible_book(book_str):
+    """Look up a book name (with common aliases) in BIBLE_BOOKS. Returns (idx, max_chapter) or None."""
+    lower = book_str.strip().lower()
+    aliases = {
+        "psalm": "psalms",
+        "song of songs": "song of solomon",
+        "song": "song of solomon",
+        "the song of solomon": "song of solomon",
+        "revelation of john": "revelation",
+    }
+    lower = aliases.get(lower, lower)
+    for idx, (name, _, max_ch) in enumerate(BIBLE_BOOKS):
+        if name.lower() == lower:
+            return idx, max_ch
+    for idx, (name, _, max_ch) in enumerate(BIBLE_BOOKS):
+        if name.lower().startswith(lower) or lower.startswith(name.lower()):
+            return idx, max_ch
+    return None
+
+def _bible_ref_pattern():
+    import re
+    names = sorted((b[0] for b in BIBLE_BOOKS), key=len, reverse=True)
+    escaped = [re.escape(n) for n in names]
+    return re.compile(
+        r'((?:\d+\s+)?(?:' + '|'.join(escaped) + r'))\s+(\d+)(?::\d+[-\d–]*)?',
+        re.IGNORECASE,
+    )
+
+SPURGEON_REF_RE = _bible_ref_pattern()
+
+def find_scripture_refs(text):
+    """Scan text for Bible references anywhere in it.
+
+    Yields (start, end, book_idx, chapter) for each match, mirroring the web
+    app's linkifyScriptureRefs() so any reference in the text becomes a link,
+    not just one matching a strict leading-quote format.
+    """
+    for m in SPURGEON_REF_RE.finditer(text):
+        resolved = _resolve_bible_book(m.group(1).strip())
+        if resolved is None:
+            continue
+        idx, max_ch = resolved
+        chapter = min(int(m.group(2)), max_ch)
+        yield m.start(), m.end(), idx, chapter
+
 BIBLE_TRANSLATIONS = [
     ("World English Bible", "web"),
     ("King James Version", "kjv"),
@@ -2913,8 +2958,25 @@ X-GNOME-Autostart-enabled=true
                 rest = text
 
             if rest:
+                self._insert_scripture_linked(buf, rest + "\n\n")
+
+    def _insert_scripture_linked(self, buf, text):
+        """Insert text at the end of buf, tagging any Bible reference found
+        anywhere in it (not just a leading quote) as a clickable link."""
+        pos = 0
+        for start, end_idx, book_idx, chapter in find_scripture_refs(text):
+            if start > pos:
                 end = buf.get_end_iter()
-                buf.insert_with_tags_by_name(end, rest + "\n\n", "normal")
+                buf.insert_with_tags_by_name(end, text[pos:start], "normal")
+            end = buf.get_end_iter()
+            start_off = end.get_offset()
+            buf.insert_with_tags_by_name(end, text[start:end_idx], "link")
+            end_off = buf.get_end_iter().get_offset()
+            self._spurgeon_modern_links.append((start_off, end_off, book_idx, chapter))
+            pos = end_idx
+        if pos < len(text):
+            end = buf.get_end_iter()
+            buf.insert_with_tags_by_name(end, text[pos:], "normal")
 
     def _spurgeon_modernise(self, btn):
         api_key = self.claude_api_key.strip()
