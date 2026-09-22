@@ -18,13 +18,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         echo json_encode(['error' => 'Invalid date']);
         exit;
     }
+    $mmdd = substr($date, 5);
     $cache = file_exists($cache_file) ? (json_decode(file_get_contents($cache_file), true) ?: []) : [];
-    $cache[$date] = ['am' => $body['am'] ?? '', 'pm' => $body['pm'] ?? ''];
+    $cache[$mmdd] = ['am' => $body['am'] ?? '', 'pm' => $body['pm'] ?? ''];
     file_put_contents($cache_file, json_encode($cache, JSON_UNESCAPED_UNICODE), LOCK_EX);
     echo json_encode(['ok' => true]);
     exit;
 }
 
 $date_str = $_GET['date'] ?? date('Y-m-d');
+$mmdd      = preg_match('/^\d{4}-\d{2}-\d{2}$/', $date_str) ? substr($date_str, 5) : $date_str;
 $cache     = file_exists($cache_file) ? (json_decode(file_get_contents($cache_file), true) ?: []) : [];
-echo json_encode($cache[$date_str] ?? ['am' => '', 'pm' => ''], JSON_UNESCAPED_UNICODE);
+echo json_encode($cache[$mmdd] ?? ['am' => '', 'pm' => ''], JSON_UNESCAPED_UNICODE);

@@ -9,7 +9,7 @@ This repo contains two apps that share data formats and features:
 1. **Desktop app** — `dashboard.py` (~3,300 lines), GTK4/Python, runs on Linux Mint 22+/Ubuntu 24.04+
 2. **Web app** — `web/`, PHP + vanilla HTML/CSS/JS, hosted at `md.paullintott.uk` on DirectAdmin
 
-Both apps show the same seven tabs: Spurgeon devotional, News, Weather, Bible, Prayer, Notes, Sermons. The desktop app additionally has a Calendar tab (Google Calendar). The web app adds multi-user support, sub-points on prayers, M'Cheyne readings, and an admin panel.
+Both apps show the same tabs: Daily Bible, Spurgeon devotional, Systematics (Theology), News, Weather, Bible, Prayer, Notes, Sermons, Resources. The desktop app additionally has a Calendar tab (Google Calendar). The web app adds multi-user support, sub-points on prayers, M'Cheyne readings, and an admin panel.
 
 ## Running the desktop app
 
@@ -98,6 +98,10 @@ root (Gtk.Box, vertical)
 **Access request system:** `request.php` is public (auth exempt). Submissions go to `data/access_requests.json`. Rate limited to 3/IP/hour via `data/rate_limit.json`. Admin approves/denies via `api/access.php`.
 
 **Frontend (`web/static/app.js`):** Vanilla JS, no framework. Key globals: `ALL_TABS`, `TAB_META`, `window.INIT_PREFS`, `window.IS_ADMIN`. Sidebar is built dynamically from tab order/visibility prefs. Scripture refs in Spurgeon text are linkified to open the Bible tab. M'Cheyne readings calculated client-side.
+
+## Daily Bible tab
+
+Shows three readings a day with full text: a New Testament portion (pericope-based, 365 days), a Psalm (1–150 cycling, Psalm 119 over 4 days) and 2–3 verses of Proverbs (whole book per year). The plan tables (`DAILY_NT_PLAN` / `DAILY_PSALM_PLAN` / `DAILY_PROV_PLAN`, entries `[label, [[bookId, chapter, from, to], ...]]`) are **generated, not hand-edited** — they live in both `web/static/app.js` and `dashboard.py`. To change the NT divisions edit `tools/nt_daily_readings.txt` (one day per line) and run `python3 tools/gen_daily_plan.py --js` / `--py`, which validates every NT verse is covered exactly once and prints the tables to paste in. No new API: both apps fetch whole chapters via the existing Bible code and filter the verse range client-side.
 
 ## Development workflow
 

@@ -53,6 +53,11 @@ function weather_desc(int $code): string {
     return $map[$code] ?? "Code $code";
 }
 
+function compass(float $deg): string {
+    $dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+    return $dirs[(int)round($deg / 22.5) % 16];
+}
+
 try {
     // Resolve coordinates
     if (!empty($_GET['lat']) && !empty($_GET['lon'])) {
@@ -77,22 +82,29 @@ try {
     $w = curl_json(
         "https://api.open-meteo.com/v1/forecast"
         . "?latitude={$lat}&longitude={$lon}"
-        . "&current_weather=true"
-        . "&daily=weathercode,temperature_2m_max,temperature_2m_min"
-        . "&temperature_unit=celsius&timezone=auto"
+        . "&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,"
+        . "wind_speed_10m,wind_direction_10m,wind_gusts_10m,is_day"
+        . "&hourly=temperature_2m,weather_code,precipitation_probability"
+        . "&daily=weathercode,temperature_2m_max,temperature_2m_min,sunrise,sunset,"
+        . "uv_index_max,precipitation_probability_max"
+        . "&temperature_unit=celsius&wind_speed_unit=mph&timezone=auto"
     );
 
-    $cw   = $w['current_weather'] ?? [];
-    $temp = ($cw['temperature'] ?? '--') . '°C';
-    $code = (int)($cw['weathercode'] ?? 0);
+    $cur  = $w['current'] ?? [];
+    $temp = (isset($cur['temperature_2m']) ? round($cur['temperature_2m']) : '--') . '°C';
+    $code = (int)($cur['weather_code'] ?? 0);
     $desc = weather_desc($code) . '  —  ' . $city;
     $icon = weather_icon($code);
 
     $daily    = $w['daily'] ?? [];
-    $dates    = $daily['time']                ?? [];
-    $codes    = $daily['weathercode']         ?? [];
-    $maxtemps = $daily['temperature_2m_max']  ?? [];
-    $mintemps = $daily['temperature_2m_min']  ?? [];
+    $dates    = $daily['time']                          ?? [];
+    $codes    = $daily['weathercode']                   ?? [];
+    $maxtemps = $daily['temperature_2m_max']             ?? [];
+    $mintemps = $daily['temperature_2m_min']             ?? [];
+    $sunrises = $daily['sunrise']                        ?? [];
+    $sunsets  = $daily['sunset']                         ?? [];
+    $uvmax    = $daily['uv_index_max']                   ?? [];
+    $rainmax  = $daily['precipitation_probability_max']  ?? [];
 
     $forecast = [];
     for ($i = 0; $i < min(7, count($dates)); $i++) {
@@ -105,7 +117,47 @@ try {
         ];
     }
 
-    echo json_encode(compact('temp','icon','desc','forecast'), JSON_UNESCAPED_UNICODE);
+    $today = [
+        'hi'          => isset($maxtemps[0]) ? round($maxtemps[0]) . '°' : '--',
+        'lo'          => isset($mintemps[0]) ? round($mintemps[0]) . '°' : '--',
+        'rain_chance' => isset($rainmax[0]) ? round($rainmax[0]) . '%' : '--',
+        'uv_index'    => isset($uvmax[0]) ? round($uvmax[0], 1) : '--',
+        'sunrise'     => isset($sunrises[0]) ? (new DateTime($sunrises[0]))->format('g:ia') : '--',
+        'sunset'      => isset($sunsets[0])  ? (new DateTime($sunsets[0]))->format('g:ia')  : '--',
+    ];
+
+    $details = [
+        'feels_like' => isset($cur['apparent_temperature']) ? round($cur['apparent_temperature']) . '°C' : '--',
+        'humidity'   => isset($cur['relative_humidity_2m']) ? round($cur['relative_humidity_2m']) . '%' : '--',
+        'wind'       => isset($cur['wind_speed_10m'])
+            ? round($cur['wind_speed_10m']) . ' mph ' . compass((float)($cur['wind_direction_10m'] ?? 0))
+            : '--',
+        'wind_gusts' => isset($cur['wind_gusts_10m']) ? round($cur['wind_gusts_10m']) . ' mph' : '--',
+    ];
+
+    // Next 12 hours from now
+    $hourly     = $w['hourly'] ?? [];
+    $htimes     = $hourly['time']                      ?? [];
+    $htemps     = $hourly['temperature_2m']             ?? [];
+    $hcodes     = $hourly['weather_code']                ?? [];
+    $hrain      = $hourly['precipitation_probability']   ?? [];
+    $now        = new DateTime($w['current']['time'] ?? 'now');
+    $startIdx   = 0;
+    foreach ($htimes as $idx => $t) {
+        if (new DateTime($t) >= $now) { $startIdx = $idx; break; }
+    }
+    $hourly_forecast = [];
+    for ($i = $startIdx; $i < min($startIdx + 12, count($htimes)); $i++) {
+        $t = new DateTime($htimes[$i]);
+        $hourly_forecast[] = [
+            'time'        => $t->format('ga'),
+            'icon'        => weather_icon((int)($hcodes[$i] ?? 0)),
+            'temp'        => isset($htemps[$i]) ? round($htemps[$i]) . '°' : '--',
+            'rain_chance' => isset($hrain[$i]) ? round($hrain[$i]) . '%' : '--',
+        ];
+    }
+
+    echo json_encode(compact('temp','icon','desc','forecast','today','details','hourly_forecast'), JSON_UNESCAPED_UNICODE);
 } catch (Exception $e) {
-    echo json_encode(['temp'=>'--°C','icon'=>'🌡️','desc'=>'Could not load weather: '.$e->getMessage(),'forecast'=>[]]);
+    echo json_encode(['temp'=>'--°C','icon'=>'🌡️','desc'=>'Could not load weather: '.$e->getMessage(),'forecast'=>[],'today'=>[],'details'=>[],'hourly_forecast'=>[]]);
 }

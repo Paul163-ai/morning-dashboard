@@ -198,6 +198,7 @@ body.guest #content { padding-bottom: calc(40px + env(safe-area-inset-bottom, 0p
     transition: background 150ms;
 }
 
+.sidebar-indicator-daily    { --ind-color: #26a69a; }
 .sidebar-indicator-spurgeon { --ind-color: #f0a500; }
 .sidebar-indicator-news     { --ind-color: #4a9eff; }
 .sidebar-indicator-weather  { --ind-color: #00bcd4; }
@@ -205,6 +206,8 @@ body.guest #content { padding-bottom: calc(40px + env(safe-area-inset-bottom, 0p
 .sidebar-indicator-bible    { --ind-color: #ffd54f; }
 .sidebar-indicator-prayer   { --ind-color: #ef5350; }
 .sidebar-indicator-notes    { --ind-color: #ff7043; }
+.sidebar-indicator-systematics { --ind-color: #7e57c2; }
+.sidebar-indicator-resources { --ind-color: #8d6e63; }
 
 .icon-row.active .sidebar-indicator { background: var(--ind-color); }
 
@@ -450,6 +453,63 @@ body.guest #content { padding-bottom: calc(40px + env(safe-area-inset-bottom, 0p
     caret-color: #f0a500;
 }
 #spurgeon-notes::placeholder { color: var(--subtext); }
+
+/* ── Daily Bible Tab ───────────────────────────────────────────────── */
+.daily-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 16px;
+    max-width: 800px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+.daily-reading-scroll {
+    flex: 1;
+    overflow-y: auto;
+    margin-top: 8px;
+}
+
+#daily-reading {
+    font-size: var(--font-size);
+    color: var(--reading);
+    line-height: 1.8;
+}
+
+#daily-reading .section-heading {
+    font-weight: bold;
+    font-size: calc(var(--font-size) - 1px);
+    color: #26a69a;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    display: block;
+    margin-bottom: 4px;
+}
+
+.daily-section {
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--header-border);
+}
+.daily-section:last-child { border-bottom: none; }
+
+.daily-heading-btn {
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0 0 8px 0;
+    color: var(--text);
+    font-size: calc(var(--font-size) + 4px);
+    font-weight: bold;
+    cursor: pointer;
+    text-align: left;
+}
+.daily-heading-btn:hover { color: #26a69a; text-decoration: underline; }
+
+#daily-reading p { margin: 0 0 12px 0; }
+#daily-reading p:last-child { margin-bottom: 0; }
 
 /* ── Systematics Tab ───────────────────────────────────────────────── */
 .systematics-pane {
@@ -733,6 +793,19 @@ body.guest #content { padding-bottom: calc(40px + env(safe-area-inset-bottom, 0p
         flex: none;
         overflow: visible;
     }
+
+    /* Daily Bible: likewise */
+    #tab-daily {
+        overflow-y: auto;
+    }
+    .daily-pane {
+        flex: none;
+        overflow: visible;
+    }
+    .daily-reading-scroll {
+        flex: none;
+        overflow: visible;
+    }
 }
 
 /* ── News Tab ──────────────────────────────────────────────────────── */
@@ -763,6 +836,60 @@ body.guest #content { padding-bottom: calc(40px + env(safe-area-inset-bottom, 0p
 .weather-icon { font-size: 72px; line-height: 1; }
 .weather-temp { font-size: 48px; font-weight: bold; color: var(--text); }
 .weather-desc { font-size: 14px; color: var(--subtext); margin-top: 4px; }
+.weather-hilo { font-size: calc(var(--font-size) - 1px); color: var(--subtext); margin-top: 6px; }
+
+.weather-details-grid {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 12px 0;
+}
+
+.weather-details-grid .weather-detail-card {
+    flex: 0 1 90px;
+}
+
+.weather-detail-card {
+    background: var(--weather-bg);
+    border-radius: 12px;
+    padding: 10px 6px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.weather-detail-icon  { font-size: 20px; }
+.weather-detail-value { font-size: var(--font-size); font-weight: bold; color: var(--text); }
+.weather-detail-label { font-size: calc(var(--font-size) - 2px); color: var(--subtext); }
+
+.hourly-row {
+    display: flex;
+    justify-content: center;
+    justify-content: safe center;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    margin-top: 8px;
+}
+
+.hourly-card {
+    background: var(--weather-bg);
+    border-radius: 12px;
+    padding: 10px 8px;
+    min-width: 60px;
+    flex: 0 0 auto;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.hourly-time { font-size: calc(var(--font-size) - 2px); color: var(--subtext); font-weight: bold; }
+.hourly-icon { font-size: 22px; }
+.hourly-temp { font-size: calc(var(--font-size) - 1px); color: var(--text); font-weight: bold; }
+.hourly-rain { font-size: calc(var(--font-size) - 3px); color: #4a9eff; }
 
 .forecast-grid {
     display: flex;
@@ -875,6 +1002,33 @@ body.guest #content { padding-bottom: calc(40px + env(safe-area-inset-bottom, 0p
     margin-bottom: 12px;
 }
 
+/* Monthly extras (prayer diary + mission calendars) pushed from desktop */
+.prayer-banner {
+    --banner-accent: #ef5350;
+    border-left: 3px solid var(--banner-accent);
+    border-radius: 0 6px 6px 0;
+    padding: 8px 14px;
+    margin-bottom: 8px;
+    background: color-mix(in srgb, var(--banner-accent) 12%, var(--bg));
+}
+.prayer-banner-title {
+    font-size: calc(var(--font-size) - 1px);
+    font-weight: bold;
+    color: var(--banner-accent);
+    margin-bottom: 2px;
+}
+.prayer-banner-main {
+    font-size: var(--font-size);
+    color: var(--text);
+    white-space: pre-wrap;
+}
+.prayer-banner-theme {
+    font-size: calc(var(--font-size) - 1px);
+    color: var(--subtext);
+    font-style: italic;
+    margin-top: 2px;
+}
+
 .prayer-input {
     flex: 1;
     background: var(--input-bg);
@@ -969,6 +1123,55 @@ body.guest #content { padding-bottom: calc(40px + env(safe-area-inset-bottom, 0p
     padding-left: 28px;
     margin-top: 2px;
 }
+
+.prayer-weekly-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 20px;
+    padding-top: 12px;
+    border-top: 1px solid var(--header-border);
+}
+
+.prayer-weekly-header {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--subtext);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.prayer-day-heading {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--subtext);
+    margin: 14px 0 4px;
+}
+.prayer-day-heading:first-child { margin-top: 4px; }
+
+.prayer-day-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-height: 28px;
+    border-radius: 6px;
+    transition: background 100ms;
+}
+.prayer-day-list.drag-over {
+    background: var(--header-border);
+    outline: 2px dashed var(--accent);
+    outline-offset: -2px;
+}
+
+.prayer-day-empty {
+    font-size: calc(var(--font-size) - 1px);
+    color: var(--subtext);
+    padding: 2px 12px 4px;
+}
+
+.prayer-item.draggable { cursor: grab; }
+.prayer-item.dragging { opacity: 0.4; }
 
 .prayer-sub-input {
     flex: 1;

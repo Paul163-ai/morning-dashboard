@@ -4,7 +4,7 @@ require_once __DIR__ . '/../helpers.php';
 
 $file = user_data_dir() . '/prefs.json';
 
-$ALL_TABS = ['spurgeon','news','weather','bible','prayer','notes','sermons'];
+$ALL_TABS = ['daily','spurgeon','systematics','news','weather','bible','prayer','notes','sermons','resources'];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $body = json_decode(file_get_contents('php://input'), true);
@@ -22,6 +22,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $new_key  = trim($body['api_bible_key'] ?? '');
     $prefs['api_bible_key'] = $new_key !== '' ? substr($new_key, 0, 200) : ($existing['api_bible_key'] ?? '');
     $prefs['sidebar_collapsed'] = (bool)($body['sidebar_collapsed'] ?? false);
+    $prefs['spurgeon_version']  = in_array($body['spurgeon_version'] ?? 'original', ['original','modern']) ? $body['spurgeon_version'] : 'original';
 
     $tab_order    = array_filter((array)($body['tab_order']    ?? $ALL_TABS), fn($k) => in_array($k, $ALL_TABS));
     $visible_tabs = array_filter((array)($body['visible_tabs'] ?? $ALL_TABS), fn($k) => in_array($k, $ALL_TABS));
