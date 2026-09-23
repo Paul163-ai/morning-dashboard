@@ -25,8 +25,10 @@ A personal daily briefing app for the Linux desktop, built with Python and GTK4.
 **[Latest release (.deb)](https://github.com/Paul163-ai/morning-dashboard/releases/latest)** — for Ubuntu 24.04 / Linux Mint 22+
 
 ```bash
-sudo dpkg -i morning-dashboard_*.deb
+sudo apt install ./morning-dashboard_*.deb
 ```
+
+(`apt install ./…` also pulls in the dependencies, which `dpkg -i` doesn't.) The installed app keeps its data — Google credentials, prayers — in `~/.local/share/morning-dashboard/`.
 
 ## Requirements
 

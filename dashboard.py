@@ -19,8 +19,14 @@ SCOPES = [
     "openid",
 ]
 PROJECT_DIR    = os.path.dirname(os.path.abspath(__file__))
-CREDENTIALS    = os.path.join(PROJECT_DIR, "credentials.json")
-TOKEN_FILE     = os.path.join(PROJECT_DIR, "token.json")
+# User data (Google credentials/token, prayers, prayer calendars). A git
+# checkout keeps it alongside dashboard.py as before; an installed copy (the
+# .deb puts the app in a root-owned directory) uses the XDG data dir instead.
+DATA_DIR       = PROJECT_DIR if os.access(PROJECT_DIR, os.W_OK) else os.path.join(
+    os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "morning-dashboard")
+os.makedirs(DATA_DIR, exist_ok=True)
+CREDENTIALS    = os.path.join(DATA_DIR, "credentials.json")
+TOKEN_FILE     = os.path.join(DATA_DIR, "token.json")
 DRIVE_FOLDER = "Morning Dashboard Backup"
 
 def get_drive_service():
@@ -93,7 +99,7 @@ def sync_sermons_to_drive(sermons_dir, status_cb):
 _DATA_FILES = [
     (os.path.expanduser("~/.config/morning-dashboard/spurgeon_notes.json"), "spurgeon_notes.json", "application/json"),
     (os.path.expanduser("~/.config/morning-dashboard/notes.txt"),           "notes.txt",           "text/plain"),
-    (os.path.join(PROJECT_DIR, "prayers.json"),                             "prayers.json",        "application/json"),
+    (os.path.join(DATA_DIR, "prayers.json"),                             "prayers.json",        "application/json"),
 ]
 
 def sync_data_to_drive(status_cb=None):
@@ -3224,7 +3230,7 @@ X-GNOME-Autostart-enabled=true
         (os.path.expanduser("~/.config/morning-dashboard/prefs.json"),          "prefs.json"),
         (os.path.expanduser("~/.config/morning-dashboard/spurgeon_notes.json"), "spurgeon_notes.json"),
         (os.path.expanduser("~/.config/morning-dashboard/notes.txt"),           "notes.txt"),
-        (os.path.join(PROJECT_DIR, "prayers.json"),                             "prayers.json"),
+        (os.path.join(DATA_DIR, "prayers.json"),                             "prayers.json"),
     ]
 
     def _export_data(self, btn):
@@ -3308,7 +3314,7 @@ X-GNOME-Autostart-enabled=true
 
     def _backup_to_drive(self, btn):
         if not os.path.exists(CREDENTIALS):
-            self._backup_status.set_text("❌ credentials.json not found in ~/morning-dashboard/")
+            self._backup_status.set_text(f"❌ credentials.json not found in {DATA_DIR}")
             return
         self._backup_status.set_text("Starting backup…")
         def run():
@@ -5605,7 +5611,7 @@ X-GNOME-Autostart-enabled=true
 
     def _sync_to_drive(self, btn):
         if not os.path.exists(CREDENTIALS):
-            self.sync_status.set_text("❌ credentials.json not found in ~/morning-dashboard/")
+            self.sync_status.set_text(f"❌ credentials.json not found in {DATA_DIR}")
             return
         self.sync_status.set_text("Starting sync…")
         def run():
@@ -5856,7 +5862,7 @@ X-GNOME-Autostart-enabled=true
         return self._PRAYER_DAY_KEYS[(datetime.date.today().weekday() + 1) % 7]
 
     def _build_prayer_tab(self):
-        PRAYER_FILE = os.path.join(PROJECT_DIR, "prayers.json")
+        PRAYER_FILE = os.path.join(DATA_DIR, "prayers.json")
         self.prayer_file = PRAYER_FILE
         self._prayer_adding_child_for = None
         self._prayer_weekly_adding_child_for = {}
@@ -5882,7 +5888,7 @@ X-GNOME-Autostart-enabled=true
 
         # Hall Green prayer diary banner
         try:
-            diary_path = os.path.join(PROJECT_DIR, "prayer_diary.json")
+            diary_path = os.path.join(DATA_DIR, "prayer_diary.json")
             with open(diary_path) as _f:
                 _diary = json.load(_f)
             _today = datetime.date.today()
@@ -5923,7 +5929,7 @@ X-GNOME-Autostart-enabled=true
             ("myanmar", "myanmar", "#66bb6a"),
         ):
             try:
-                _cal_path = os.path.join(PROJECT_DIR, f"prayer_{_cal_name}_{_month_tag}.json")
+                _cal_path = os.path.join(DATA_DIR, f"prayer_{_cal_name}_{_month_tag}.json")
                 with open(_cal_path) as _f:
                     _cal = json.load(_f)
                 _entry = _cal.get("entries", {}).get(str(_today.day), "")
@@ -6123,7 +6129,7 @@ X-GNOME-Autostart-enabled=true
         Includes this month and next so a calendar uploaded early still lands."""
         extras = {"diary": None, "calendars": []}
         try:
-            with open(os.path.join(PROJECT_DIR, "prayer_diary.json")) as f:
+            with open(os.path.join(DATA_DIR, "prayer_diary.json")) as f:
                 extras["diary"] = json.load(f)
         except Exception:
             pass
@@ -6132,7 +6138,7 @@ X-GNOME-Autostart-enabled=true
         months = {today.strftime("%Y-%m"), first_next.strftime("%Y-%m")}
         for cal_name in ("gbm", "myanmar"):
             for month in sorted(months):
-                path = os.path.join(PROJECT_DIR, f"prayer_{cal_name}_{month}.json")
+                path = os.path.join(DATA_DIR, f"prayer_{cal_name}_{month}.json")
                 try:
                     with open(path) as f:
                         cal = json.load(f)

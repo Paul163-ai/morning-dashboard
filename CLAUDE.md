@@ -24,6 +24,10 @@ First run launches a setup wizard for Google credentials. No build step needed.
 pip3 install requests google-auth google-auth-oauthlib google-api-python-client google-auth-httplib2 --break-system-packages
 ```
 
+**Building the .deb:** `tools/build_deb.sh [version]` (version defaults to today, `YYYY.MM.DD`) writes `morning-dashboard_<version>_all.deb` to the repo root. It installs to `/usr/lib/morning-dashboard/` with a `/usr/bin/morning-dashboard` launcher and generates its own `.desktop` file — the repo's `morning-dashboard.desktop` is only the local dev launcher (points at this checkout).
+
+**Data location:** `DATA_DIR` in `dashboard.py` holds `credentials.json`, `token.json`, `prayers.json` and the `prayer_*.json` calendars. It's the checkout directory when writable (dev), else `~/.local/share/morning-dashboard/` (installed .deb). Prefs, notes and sermons are always under `~/.config/morning-dashboard/`.
+
 ## Web app
 
 No build pipeline — plain PHP. To deploy: upload `web/` contents to the DirectAdmin subdomain's `public_html`. The `data/` directory must be writable (755). **Delete any `index.html` the host places there** — it takes priority over `index.php` and blocks the app.
