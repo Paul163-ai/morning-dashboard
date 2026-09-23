@@ -76,10 +76,24 @@ try {
         $lon  = (float)$r['longitude'];
         $city = $r['name'] ?? $_GET['location'];
     } else {
-        $loc  = curl_json('https://ipapi.co/json/');
-        $lat  = (float)($loc['latitude']  ?? 51.5);
-        $lon  = (float)($loc['longitude'] ?? -0.1);
-        $city = $loc['city'] ?? 'Your location';
+        // No saved location: geolocate the visitor's IP. (A bare
+        // ipapi.co/json/ would locate this server, not the user.) If the
+        // lookup fails — rate limit, private IP, timeout — fall back to London
+        // and say so, rather than showing somewhere else as "Your location".
+        $loc = [];
+        $ip  = $_SERVER['REMOTE_ADDR'] ?? '';
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+            try { $loc = curl_json('https://ipapi.co/' . rawurlencode($ip) . '/json/'); } catch (Exception $e) {}
+        }
+        if (isset($loc['latitude'], $loc['longitude']) && empty($loc['error'])) {
+            $lat  = (float)$loc['latitude'];
+            $lon  = (float)$loc['longitude'];
+            $city = ($loc['city'] ?? '') !== '' ? $loc['city'] . ' (approx.)' : 'Your location (approx.)';
+        } else {
+            $lat  = 51.5;
+            $lon  = -0.1;
+            $city = 'London — set your location in Settings';
+        }
     }
 
     $w = curl_json(
