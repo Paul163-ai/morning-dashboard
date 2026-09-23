@@ -19,9 +19,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
     $mmdd = substr($date, 5);
-    $cache = file_exists($cache_file) ? (json_decode(file_get_contents($cache_file), true) ?: []) : [];
-    $cache[$mmdd] = ['am' => $body['am'] ?? '', 'pm' => $body['pm'] ?? ''];
-    file_put_contents($cache_file, json_encode($cache, JSON_UNESCAPED_UNICODE), LOCK_EX);
+    $entry = ['am' => (string)($body['am'] ?? ''), 'pm' => (string)($body['pm'] ?? '')];
+    $saved = update_json($cache_file, function ($cache) use ($mmdd, $entry) {
+        $cache[$mmdd] = $entry;
+        return $cache;
+    }, JSON_UNESCAPED_UNICODE);
+    if (!$saved) {
+        http_response_code(500);
+        echo json_encode(['error' => 'Could not save']);
+        exit;
+    }
     echo json_encode(['ok' => true]);
     exit;
 }

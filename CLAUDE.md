@@ -68,7 +68,7 @@ root (Gtk.Box, vertical)
 
 **Per-tab accent colours:** spurgeon=#f0a500, news=#4a9eff, weather=#00bcd4, sermons=#66bb6a, calendar=#ab47bc, bible=#ffd54f, prayer=#ef5350, notes=#ff7043
 
-**Prefs file:** `~/.config/morning-dashboard/prefs.json` — includes font_size, theme, weather_location, enabled_calendars, visible_tabs, tab_order, window_width/height, web_url/user/pass.
+**Prefs file:** `~/.config/morning-dashboard/prefs.json` (written 0600 via `write_private()`, like `token.json`, since it holds passwords/API keys) — includes font_size, theme, weather_location, enabled_calendars, visible_tabs, tab_order, window_width/height, web_url/user/pass.
 
 **Google OAuth:** credentials in `credentials.json` and `token.json` (in project dir, gitignored). Scopes: Drive, Calendar, userinfo.
 
@@ -85,6 +85,8 @@ root (Gtk.Box, vertical)
 **Guest (logged-out) view:** `require_auth()` lets unauthenticated visitors load `index.php` instead of redirecting to `/login.php`, plus logged-out GET requests to `api/spurgeon.php` and `api/spurgeon_modern.php` (both stateless/read-only). `index.php` detects this via `is_authenticated()`, sets `window.IS_GUEST = true`, and forces a minimal config: only the `spurgeon` tab, no prefs loaded/saved, no settings modal, "Log in" link instead of user/logout. `app.js` checks `IS_GUEST` to skip rendering the notes textarea and Community Comments panel, and to skip the per-user API calls (`spurgeon_notes.php`, `spurgeon_comments.php`) that would 401.
 
 **CSRF protection:** After `require_auth()`, `helpers.php` checks that any POST/DELETE/PUT from a session-authenticated user includes `X-Requested-With: XMLHttpRequest`. Basic Auth requests (desktop app) are exempt. The `api()` function in `app.js` sends this header on every fetch call.
+
+**Writing data files:** use the `helpers.php` helpers, never raw `file_put_contents(json_encode(...))`. `save_json()` writes atomically (temp file + rename) and refuses to write if encoding fails; `update_json($file, fn($data) => ...)` does a locked read-modify-write (sidecar `.lock` file) for anything several requests can change at once; `clip_text()` truncates without splitting UTF-8 characters.
 
 **Per-user data isolation:** All user data lives under `web/data/users/{username}/`. The directory is created automatically on first request. `config.php` and `helpers.php` are blocked from direct web access by `.htaccess`.
 

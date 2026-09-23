@@ -105,8 +105,10 @@ $valid = !empty($results) && !array_filter($results, fn($r) =>
     $r['label'] === 'Error' || in_array($r['text'], ['Reading not found.', 'Reading not available.'])
 );
 if ($valid) {
-    $cache[$cache_key] = $results;
-    file_put_contents($cache_file, json_encode($cache, JSON_UNESCAPED_UNICODE), LOCK_EX);
+    update_json($cache_file, function ($cache) use ($cache_key, $results) {
+        $cache[$cache_key] = $results;
+        return $cache;
+    }, JSON_UNESCAPED_UNICODE);
 }
 
 echo json_encode(['readings' => $results], JSON_UNESCAPED_UNICODE);

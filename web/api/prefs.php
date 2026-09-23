@@ -12,7 +12,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // Sanitise
     $prefs = [];
-    $prefs['theme']             = in_array($body['theme'] ?? 'dark', ['dark','light']) ? $body['theme'] : 'dark';
+    $theme                      = $body['theme'] ?? 'dark';
+    $prefs['theme']             = in_array($theme, ['dark','light'], true) ? $theme : 'dark';
     $prefs['font_size']         = max(9, min(24, (int)($body['font_size'] ?? 13)));
     $prefs['weather_location']  = clip_text(strip_tags($body['weather_location'] ?? ''), 200);
     $prefs['weather_lat']       = isset($body['weather_lat'])  ? (float)$body['weather_lat']  : null;
@@ -22,7 +23,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $new_key  = trim($body['api_bible_key'] ?? '');
     $prefs['api_bible_key'] = $new_key !== '' ? substr($new_key, 0, 200) : ($existing['api_bible_key'] ?? '');
     $prefs['sidebar_collapsed'] = (bool)($body['sidebar_collapsed'] ?? false);
-    $prefs['spurgeon_version']  = in_array($body['spurgeon_version'] ?? 'original', ['original','modern']) ? $body['spurgeon_version'] : 'original';
+    $spurgeon_version           = $body['spurgeon_version'] ?? 'original';
+    $prefs['spurgeon_version']  = in_array($spurgeon_version, ['original','modern'], true) ? $spurgeon_version : 'original';
 
     $tab_order    = array_filter((array)($body['tab_order']    ?? $ALL_TABS), fn($k) => in_array($k, $ALL_TABS));
     $visible_tabs = array_filter((array)($body['visible_tabs'] ?? $ALL_TABS), fn($k) => in_array($k, $ALL_TABS));
@@ -45,5 +47,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $prefs = [];
     }
+    // The API.Bible key stays server-side (bible.php reads it directly).
+    $prefs['api_bible_key_set'] = !empty($prefs['api_bible_key']);
+    unset($prefs['api_bible_key']);
     echo json_encode($prefs, JSON_UNESCAPED_UNICODE);
 }

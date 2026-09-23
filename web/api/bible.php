@@ -82,6 +82,9 @@ try {
         echo json_encode(['verses' => $verses, 'citation' => $APIBIBLE_CITATIONS[$bible_name] ?? ''],
                          JSON_UNESCAPED_UNICODE);
     } else {
+        // bible-api.com codes are short lowercase ids (web, kjv, oeb-cw…);
+        // anything else would be injected into the upstream URL path.
+        if (!preg_match('/^[a-z0-9-]{2,12}$/', $translation)) throw new RuntimeException('Unknown translation');
         $url    = "https://bible-api.com/data/{$translation}/{$book_id}/{$chapter}";
         $result = curl_get_json($url);
         if ($result['code'] !== 200) throw new RuntimeException("HTTP {$result['code']}");

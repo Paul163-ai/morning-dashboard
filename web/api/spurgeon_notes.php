@@ -44,7 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $data[$date] = $text;
             }
         }
-        file_put_contents($notes_file, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        save_json($notes_file, $data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
         echo json_encode(['ok' => true]);
         exit;
     }
@@ -52,13 +52,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $date = preg_replace('/[^0-9\-]/', '', $body['date'] ?? date('Y-m-d'));
     $text = $body['text'] ?? '';
 
-    $data = load_notes($notes_file);
-    if ($text !== '') {
-        $data[$date] = $text;
-    } else {
-        unset($data[$date]);
-    }
-    file_put_contents($notes_file, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    // Locked, since the desktop app and a browser can save at the same time.
+    update_json($notes_file, function ($data) use ($date, $text) {
+        if ($text !== '') {
+            $data[$date] = $text;
+        } else {
+            unset($data[$date]);
+        }
+        return $data;
+    }, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
     echo json_encode(['ok' => true]);
 } elseif (isset($_GET['all'])) {
     echo json_encode(['notes' => load_notes($notes_file)], JSON_UNESCAPED_UNICODE);

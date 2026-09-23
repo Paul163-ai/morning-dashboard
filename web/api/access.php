@@ -71,8 +71,18 @@ function load_requests(string $file): array {
     return file_exists($file) ? (json_decode(file_get_contents($file), true) ?: []) : [];
 }
 
-function save_requests(string $file, array $requests): void {
-    save_json($file, array_values($requests), JSON_PRETTY_PRINT);
+// Locked update of the pending request for $username (if any): $fn receives
+// the request array by reference.
+function update_pending_request(string $file, string $username, callable $fn): void {
+    update_json($file, function ($requests) use ($username, $fn) {
+        foreach ($requests as &$r) {
+            if ($r['username'] === $username && $r['status'] === 'pending') {
+                $fn($r);
+                return array_values($requests);
+            }
+        }
+        return null;
+    }, JSON_PRETTY_PRINT);
 }
 
 function read_htpasswd_lines(): array {
@@ -141,12 +151,9 @@ if ($action === 'list') {
         }
     }
 
-    foreach ($requests as &$r) {
-        if ($r['username'] === $username && $r['status'] === 'pending') {
-            $r['status'] = 'approved'; $r['approved'] = date('Y-m-d H:i:s'); break;
-        }
-    }
-    save_requests($requests_file, $requests);
+    update_pending_request($requests_file, $username, function (&$r) {
+        $r['status'] = 'approved'; $r['approved'] = date('Y-m-d H:i:s');
+    });
     if ($stored_email) set_user_email($username, $stored_email);
     $result = ['ok' => true, 'username' => $username, 'user_set_password' => (bool)$stored_hash];
     if ($response_password) $result['password'] = $response_password;
@@ -154,13 +161,9 @@ if ($action === 'list') {
 
 } elseif ($action === 'deny') {
     $username = preg_replace('/[^a-zA-Z0-9_\-]/', '', $body['username'] ?? '');
-    $requests = load_requests($requests_file);
-    foreach ($requests as &$r) {
-        if ($r['username'] === $username && $r['status'] === 'pending') {
-            $r['status'] = 'denied'; break;
-        }
-    }
-    save_requests($requests_file, $requests);
+    update_pending_request($requests_file, $username, function (&$r) {
+        $r['status'] = 'denied';
+    });
     echo json_encode(['ok' => true]);
 
 } elseif ($action === 'reset_password') {
@@ -191,9 +194,7 @@ if ($action === 'list') {
     }
 
     // Remove from .htpasswd
-    $lines = read_htpasswd_lines();
-    $lines = array_values(array_filter($lines, fn($l) => !str_starts_with($l, $username . ':')));
-    file_put_contents(HTPASSWD_FILE, implode("\n", $lines) . "\n");
+    remove_htpasswd_user(HTPASSWD_FILE, $username);
 
     // End their open sessions and remember-me cookies, which would otherwise
     // keep working (and recreate the data dir) after the account is gone.
@@ -212,14 +213,7 @@ if ($action === 'list') {
     }
 
     // Remove any stored email
-    $emails_file = __DIR__ . '/../data/user_emails.json';
-    if (file_exists($emails_file)) {
-        $emails = json_decode(file_get_contents($emails_file), true) ?: [];
-        if (array_key_exists($username, $emails)) {
-            unset($emails[$username]);
-            file_put_contents($emails_file, json_encode($emails, JSON_PRETTY_PRINT), LOCK_EX);
-        }
-    }
+    delete_user_email($username);
 
     echo json_encode(['ok' => true]);
 

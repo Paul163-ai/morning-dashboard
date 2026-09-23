@@ -46,12 +46,53 @@ function clip_text($s, int $max): string {
     return mb_substr(mb_scrub((string)$s, 'UTF-8'), 0, $max, 'UTF-8');
 }
 
+// Replace $file's contents via temp file + rename, so concurrent readers never
+// see a half-written file. Keeps the existing file's permissions. Falls back to
+// an in-place write if the directory doesn't allow creating the temp file.
+function write_file_atomic(string $file, string $content): bool {
+    $tmp = $file . '.tmp' . bin2hex(random_bytes(4));
+    if (@file_put_contents($tmp, $content) !== false) {
+        if (file_exists($file)) @chmod($tmp, fileperms($file) & 0777);
+        if (@rename($tmp, $file)) return true;
+        @unlink($tmp);
+    }
+    return file_put_contents($file, $content, LOCK_EX) !== false;
+}
+
 // Encode and write JSON, refusing to write if encoding fails — otherwise
 // file_put_contents(false) would silently truncate the file to empty.
 function save_json(string $file, $data, int $flags = 0): bool {
     $json = json_encode($data, $flags | JSON_INVALID_UTF8_SUBSTITUTE);
     if ($json === false) return false;
-    return file_put_contents($file, $json, LOCK_EX) !== false;
+    return write_file_atomic($file, $json);
+}
+
+function read_json(string $file): array {
+    if (!file_exists($file)) return [];
+    $data = json_decode(file_get_contents($file), true);
+    return is_array($data) ? $data : [];
+}
+
+// Run $fn while holding an exclusive lock for $file (on a sidecar .lock file),
+// so read-modify-write cycles from concurrent requests can't lose updates.
+// If the lock file can't be created, $fn still runs, just unlocked.
+function with_file_lock(string $file, callable $fn) {
+    $lock = @fopen($file . '.lock', 'c');
+    if ($lock) flock($lock, LOCK_EX);
+    try {
+        return $fn();
+    } finally {
+        if ($lock) { flock($lock, LOCK_UN); fclose($lock); }
+    }
+}
+
+// Locked read-modify-write of a shared JSON file. $fn gets the current data
+// and returns the new data, or null to leave the file untouched.
+function update_json(string $file, callable $fn, int $flags = 0): bool {
+    return with_file_lock($file, function () use ($file, $fn, $flags) {
+        $new = $fn(read_json($file));
+        return $new === null ? true : save_json($file, $new, $flags);
+    });
 }
 
 // --- Remember-me tokens ---
@@ -61,40 +102,34 @@ function _remember_tokens_file(): string {
 }
 
 function create_remember_token(string $username): string {
-    $token  = bin2hex(random_bytes(32));
-    $file   = _remember_tokens_file();
-    $tokens = file_exists($file) ? (json_decode(file_get_contents($file), true) ?: []) : [];
-    $now    = time();
-    foreach ($tokens as $t => $d) {
-        if ($d['expires'] < $now) unset($tokens[$t]);
-    }
-    $tokens[$token] = ['user' => $username, 'expires' => $now + REMEMBER_ME_DURATION];
-    file_put_contents($file, json_encode($tokens), LOCK_EX);
+    $token = bin2hex(random_bytes(32));
+    update_json(_remember_tokens_file(), function ($tokens) use ($token, $username) {
+        $now = time();
+        foreach ($tokens as $t => $d) {
+            if (($d['expires'] ?? 0) < $now) unset($tokens[$t]);
+        }
+        $tokens[$token] = ['user' => $username, 'expires' => $now + REMEMBER_ME_DURATION];
+        return $tokens;
+    });
     return $token;
 }
 
 function validate_remember_token(string $token): ?string {
-    $file = _remember_tokens_file();
-    if (!file_exists($file)) return null;
-    $tokens = json_decode(file_get_contents($file), true) ?: [];
-    $data   = $tokens[$token] ?? null;
+    $data = read_json(_remember_tokens_file())[$token] ?? null;
     if (!$data) return null;
     if ($data['expires'] < time()) {
-        unset($tokens[$token]);
-        file_put_contents($file, json_encode($tokens), LOCK_EX);
+        invalidate_remember_token($token);
         return null;
     }
     return preg_replace('/[^a-zA-Z0-9_\-]/', '', $data['user'] ?? '') ?: null;
 }
 
 function invalidate_remember_token(string $token): void {
-    $file = _remember_tokens_file();
-    if (!file_exists($file)) return;
-    $tokens = json_decode(file_get_contents($file), true) ?: [];
-    if (array_key_exists($token, $tokens)) {
+    update_json(_remember_tokens_file(), function ($tokens) use ($token) {
+        if (!array_key_exists($token, $tokens)) return null;
         unset($tokens[$token]);
-        file_put_contents($file, json_encode($tokens), LOCK_EX);
-    }
+        return $tokens;
+    });
 }
 
 // Set a fresh remember-me cookie for $username on this browser.
@@ -112,18 +147,15 @@ function _logins_revoked_file(): string {
 }
 
 function logins_revoked_at(string $username): int {
-    $file = _logins_revoked_file();
-    if (!file_exists($file)) return 0;
-    $data = json_decode(file_get_contents($file), true) ?: [];
-    return (int)($data[$username] ?? 0);
+    return (int)(read_json(_logins_revoked_file())[$username] ?? 0);
 }
 
 function revoke_logins(string $username): void {
     invalidate_all_remember_tokens_for_user($username);
-    $file = _logins_revoked_file();
-    $data = file_exists($file) ? (json_decode(file_get_contents($file), true) ?: []) : [];
-    $data[$username] = time();
-    save_json($file, $data);
+    update_json(_logins_revoked_file(), function ($data) use ($username) {
+        $data[$username] = time();
+        return $data;
+    });
     // A user revoking their own logins (changing their password) stays logged
     // in on this browser, including its remember-me cookie if it had one.
     if (($_SESSION['user'] ?? '') === $username) {
@@ -141,46 +173,40 @@ function _password_resets_file(): string {
 }
 
 function create_password_reset_token(string $username): string {
-    $token  = bin2hex(random_bytes(32));
-    $file   = _password_resets_file();
-    $tokens = file_exists($file) ? (json_decode(file_get_contents($file), true) ?: []) : [];
-    $now    = time();
-    foreach ($tokens as $t => $d) {
-        if ($d['expires'] < $now) unset($tokens[$t]);
-    }
-    $tokens[$token] = ['user' => $username, 'expires' => $now + PASSWORD_RESET_DURATION, 'used' => false];
-    file_put_contents($file, json_encode($tokens), LOCK_EX);
+    $token = bin2hex(random_bytes(32));
+    update_json(_password_resets_file(), function ($tokens) use ($token, $username) {
+        $now = time();
+        foreach ($tokens as $t => $d) {
+            if (($d['expires'] ?? 0) < $now) unset($tokens[$t]);
+        }
+        $tokens[$token] = ['user' => $username, 'expires' => $now + PASSWORD_RESET_DURATION, 'used' => false];
+        return $tokens;
+    });
     return $token;
 }
 
 function validate_password_reset_token(string $token): ?string {
-    $file = _password_resets_file();
-    if (!file_exists($file)) return null;
-    $tokens = json_decode(file_get_contents($file), true) ?: [];
-    $data   = $tokens[$token] ?? null;
+    $data = read_json(_password_resets_file())[$token] ?? null;
     if (!$data || !empty($data['used']) || $data['expires'] < time()) return null;
     return preg_replace('/[^a-zA-Z0-9_\-]/', '', $data['user'] ?? '') ?: null;
 }
 
 function invalidate_password_reset_token(string $token): void {
-    $file = _password_resets_file();
-    if (!file_exists($file)) return;
-    $tokens = json_decode(file_get_contents($file), true) ?: [];
-    if (isset($tokens[$token])) {
+    update_json(_password_resets_file(), function ($tokens) use ($token) {
+        if (!isset($tokens[$token])) return null;
         $tokens[$token]['used'] = true;
-        file_put_contents($file, json_encode($tokens), LOCK_EX);
-    }
+        return $tokens;
+    });
 }
 
 function invalidate_all_remember_tokens_for_user(string $username): void {
-    $file = _remember_tokens_file();
-    if (!file_exists($file)) return;
-    $tokens = json_decode(file_get_contents($file), true) ?: [];
-    $changed = false;
-    foreach ($tokens as $t => $d) {
-        if (($d['user'] ?? '') === $username) { unset($tokens[$t]); $changed = true; }
-    }
-    if ($changed) file_put_contents($file, json_encode($tokens), LOCK_EX);
+    update_json(_remember_tokens_file(), function ($tokens) use ($username) {
+        $changed = false;
+        foreach ($tokens as $t => $d) {
+            if (($d['user'] ?? '') === $username) { unset($tokens[$t]); $changed = true; }
+        }
+        return $changed ? $tokens : null;
+    });
 }
 
 // --- Per-user email addresses ---
@@ -190,23 +216,27 @@ function _user_emails_file(): string {
 }
 
 function get_user_email(string $username): ?string {
-    $file = _user_emails_file();
-    if (!file_exists($file)) return null;
-    $emails = json_decode(file_get_contents($file), true) ?: [];
-    return $emails[$username] ?? null;
+    return read_json(_user_emails_file())[$username] ?? null;
 }
 
 function set_user_email(string $username, string $email): void {
-    $file   = _user_emails_file();
-    $emails = file_exists($file) ? (json_decode(file_get_contents($file), true) ?: []) : [];
-    $emails[$username] = $email;
-    file_put_contents($file, json_encode($emails, JSON_PRETTY_PRINT), LOCK_EX);
+    update_json(_user_emails_file(), function ($emails) use ($username, $email) {
+        $emails[$username] = $email;
+        return $emails;
+    }, JSON_PRETTY_PRINT);
+}
+
+// Removes the stored email for $username (used when deleting an account).
+function delete_user_email(string $username): void {
+    update_json(_user_emails_file(), function ($emails) use ($username) {
+        if (!array_key_exists($username, $emails)) return null;
+        unset($emails[$username]);
+        return $emails;
+    }, JSON_PRETTY_PRINT);
 }
 
 function find_username_by_email(string $email): ?string {
-    $file = _user_emails_file();
-    if (!file_exists($file)) return null;
-    $emails = json_decode(file_get_contents($file), true) ?: [];
+    $emails = read_json(_user_emails_file());
     foreach ($emails as $username => $stored) {
         if (strcasecmp($stored, $email) === 0) return $username;
     }
@@ -216,36 +246,40 @@ function find_username_by_email(string $email): ?string {
 // --- Rate limiting (by IP, used by request.php / forgot_password.php) ---
 
 function check_rate_limit(string $file, string $ip, int $max = 3, int $window = 3600): bool {
-    $data = file_exists($file) ? (json_decode(file_get_contents($file), true) ?: []) : [];
-    $now  = time();
-    $data = array_filter($data, fn($t) => ($now - $t) < $window);
-    $ip_entries = array_filter($data, fn($t, $k) => $k === $ip || str_starts_with($k, $ip . '_'), ARRAY_FILTER_USE_BOTH);
-    if (count($ip_entries) >= $max) return false;
-    $data[$ip . '_' . $now] = $now;
-    file_put_contents($file, json_encode($data), LOCK_EX);
-    return true;
+    $allowed = false;
+    update_json($file, function ($data) use ($ip, $max, $window, &$allowed) {
+        $now  = time();
+        $data = array_filter($data, fn($t) => ($now - $t) < $window);
+        $ip_entries = array_filter($data, fn($t, $k) => $k === $ip || str_starts_with($k, $ip . '_'), ARRAY_FILTER_USE_BOTH);
+        if (count($ip_entries) >= $max) return null;
+        $key = $ip . '_' . $now;
+        for ($n = 1; isset($data[$key]); $n++) $key = $ip . '_' . $now . '_' . $n;
+        $data[$key] = $now;
+        $allowed = true;
+        return $data;
+    });
+    return $allowed;
 }
 
 // --- Login log ---
 
 function log_login_event(string $user, string $ip, string $method, bool $ok): void {
-    $file    = __DIR__ . '/data/login_log.json';
-    $entries = file_exists($file) ? (json_decode(file_get_contents($file), true) ?: []) : [];
-    array_unshift($entries, ['ts' => time(), 'user' => $user, 'ip' => $ip, 'method' => $method, 'ok' => $ok]);
-    if (count($entries) > 200) $entries = array_slice($entries, 0, 200);
-    file_put_contents($file, json_encode($entries), LOCK_EX);
+    update_json(__DIR__ . '/data/login_log.json', function ($entries) use ($user, $ip, $method, $ok) {
+        array_unshift($entries, ['ts' => time(), 'user' => $user, 'ip' => $ip, 'method' => $method, 'ok' => $ok]);
+        return array_slice($entries, 0, 200);
+    });
 }
 
 // --- Guest visits ---
 
 function record_guest_visit(string $ip): void {
-    $file = __DIR__ . '/data/guest_visits.json';
-    $data = file_exists($file) ? (json_decode(file_get_contents($file), true) ?: []) : [];
-    $data['total'] = ($data['total'] ?? 0) + 1;
-    $data['entries'] = $data['entries'] ?? [];
-    array_unshift($data['entries'], ['ts' => time(), 'ip' => $ip]);
-    if (count($data['entries']) > 200) $data['entries'] = array_slice($data['entries'], 0, 200);
-    file_put_contents($file, json_encode($data), LOCK_EX);
+    update_json(__DIR__ . '/data/guest_visits.json', function ($data) use ($ip) {
+        $data['total'] = ($data['total'] ?? 0) + 1;
+        $data['entries'] = $data['entries'] ?? [];
+        array_unshift($data['entries'], ['ts' => time(), 'ip' => $ip]);
+        $data['entries'] = array_slice($data['entries'], 0, 200);
+        return $data;
+    });
 }
 
 // --- Failed-login lockout (by IP) ---
@@ -257,8 +291,7 @@ const LOGIN_MAX_ATTEMPTS  = 5;
 const LOGIN_WINDOW        = 900; // 15 minutes
 
 function _login_attempts(string $ip): int {
-    if (!file_exists(LOGIN_ATTEMPTS_FILE)) return 0;
-    $data = json_decode(file_get_contents(LOGIN_ATTEMPTS_FILE), true) ?: [];
+    $data   = read_json(LOGIN_ATTEMPTS_FILE);
     $cutoff = time() - LOGIN_WINDOW;
     $count  = 0;
     foreach ($data as $key => $ts) {
@@ -268,26 +301,27 @@ function _login_attempts(string $ip): int {
 }
 
 function _record_failed_attempt(string $ip): void {
-    $data   = file_exists(LOGIN_ATTEMPTS_FILE) ? (json_decode(file_get_contents(LOGIN_ATTEMPTS_FILE), true) ?: []) : [];
-    $now    = time();
-    $cutoff = $now - LOGIN_WINDOW;
-    $data   = array_filter($data, fn($t) => $t >= $cutoff);
-    // Several failures can land in the same second (the desktop app fires
-    // requests in parallel), so make each key unique rather than overwrite.
-    $key = $ip . '_' . $now;
-    for ($n = 1; isset($data[$key]); $n++) $key = $ip . '_' . $now . '_' . $n;
-    $data[$key] = $now;
-    file_put_contents(LOGIN_ATTEMPTS_FILE, json_encode($data), LOCK_EX);
+    update_json(LOGIN_ATTEMPTS_FILE, function ($data) use ($ip) {
+        $now    = time();
+        $cutoff = $now - LOGIN_WINDOW;
+        $data   = array_filter($data, fn($t) => $t >= $cutoff);
+        // Several failures can land in the same second (the desktop app fires
+        // requests in parallel), so make each key unique rather than overwrite.
+        $key = $ip . '_' . $now;
+        for ($n = 1; isset($data[$key]); $n++) $key = $ip . '_' . $now . '_' . $n;
+        $data[$key] = $now;
+        return $data;
+    });
 }
 
 function _clear_failed_attempts(string $ip): void {
-    if (!file_exists(LOGIN_ATTEMPTS_FILE)) return;
-    $data = json_decode(file_get_contents(LOGIN_ATTEMPTS_FILE), true) ?: [];
-    $changed = false;
-    foreach (array_keys($data) as $key) {
-        if ($key === $ip || str_starts_with($key, $ip . '_')) { unset($data[$key]); $changed = true; }
-    }
-    if ($changed) file_put_contents(LOGIN_ATTEMPTS_FILE, json_encode($data), LOCK_EX);
+    update_json(LOGIN_ATTEMPTS_FILE, function ($data) use ($ip) {
+        $changed = false;
+        foreach (array_keys($data) as $key) {
+            if ($key === $ip || str_starts_with($key, $ip . '_')) { unset($data[$key]); $changed = true; }
+        }
+        return $changed ? $data : null;
+    });
 }
 
 // --- Auth ---
@@ -458,28 +492,33 @@ function apr1_md5(string $password, string $salt = ''): string {
     return '$apr1$' . $salt . '$' . $hash;
 }
 
+// Locked read-modify-write of an .htpasswd file: $fn gets its lines (without
+// newlines) and returns the new lines.
+function update_htpasswd(string $file, callable $fn): bool {
+    return with_file_lock($file, function () use ($file, $fn) {
+        $lines = file_exists($file)
+            ? file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES)
+            : [];
+        return write_file_atomic($file, implode("\n", $fn($lines)) . "\n");
+    });
+}
+
 function write_htpasswd_prehashed(string $file, string $username, string $hash): bool {
     $new_line = $username . ':' . $hash;
-    $lines    = file_exists($file)
-        ? file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES)
-        : [];
-    $found = false;
-    foreach ($lines as &$line) {
-        if (str_starts_with($line, $username . ':')) { $line = $new_line; $found = true; break; }
-    }
-    if (!$found) $lines[] = $new_line;
-    return file_put_contents($file, implode("\n", $lines) . "\n") !== false;
+    return update_htpasswd($file, function ($lines) use ($username, $new_line) {
+        foreach ($lines as $i => $line) {
+            if (str_starts_with($line, $username . ':')) { $lines[$i] = $new_line; return $lines; }
+        }
+        $lines[] = $new_line;
+        return $lines;
+    });
 }
 
 function write_htpasswd(string $file, string $username, string $password): bool {
-    $new_line = $username . ':' . apr1_md5($password);
-    $lines    = file_exists($file)
-        ? file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES)
-        : [];
-    $found = false;
-    foreach ($lines as &$line) {
-        if (str_starts_with($line, $username . ':')) { $line = $new_line; $found = true; break; }
-    }
-    if (!$found) $lines[] = $new_line;
-    return file_put_contents($file, implode("\n", $lines) . "\n") !== false;
+    return write_htpasswd_prehashed($file, $username, apr1_md5($password));
+}
+
+function remove_htpasswd_user(string $file, string $username): bool {
+    return update_htpasswd($file, fn($lines) =>
+        array_values(array_filter($lines, fn($l) => !str_starts_with($l, $username . ':'))));
 }

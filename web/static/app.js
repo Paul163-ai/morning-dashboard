@@ -560,8 +560,10 @@ function renderSpurgeonReading(readings) {
     });
 }
 
+// Safe in element content and in quoted attribute values.
 function escapeHtml(s) {
-    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 function linkifyScriptureRefs(text) {

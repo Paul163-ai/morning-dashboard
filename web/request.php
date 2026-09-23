@@ -38,23 +38,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $message = 'Passwords do not match.';
         $message_type = 'error';
     } else {
-        $requests = file_exists($requests_file)
-            ? (json_decode(file_get_contents($requests_file), true) ?: [])
-            : [];
-
-        // Check for duplicate pending request or existing account
-        $already = array_filter($requests, fn($r) => $r['username'] === $username && $r['status'] === 'pending');
+        // Check for an existing account, then (under the file lock, so two
+        // simultaneous submissions can't both get through) for a duplicate
+        // pending request before appending.
         $taken = false;
         if (file_exists(HTPASSWD_FILE)) {
             foreach (file(HTPASSWD_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
                 if (str_starts_with($line, $username . ':')) { $taken = true; break; }
             }
         }
-        if ($already || $taken) {
-            $message = 'That username is already taken.';
-            $message_type = 'error';
-        } else {
-            $requests[] = [
+        $already = false;
+        $saved   = false;
+        if (!$taken) {
+            $new_request = [
                 'username'      => $username,
                 'name'          => $name,
                 'email'         => $email,
@@ -63,11 +59,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'requested'     => date('Y-m-d H:i:s'),
                 'status'        => 'pending',
             ];
-            if (!save_json($requests_file, $requests, JSON_PRETTY_PRINT)) {
-                $message = 'Could not save your request — please try again later.';
-                $message_type = 'error';
-                goto render;
-            }
+            $saved = update_json($requests_file, function ($requests) use ($username, $new_request, &$already) {
+                foreach ($requests as $r) {
+                    if ($r['username'] === $username && $r['status'] === 'pending') { $already = true; return null; }
+                }
+                $requests[] = $new_request;
+                return $requests;
+            }, JSON_PRETTY_PRINT);
+        }
+        if ($already || $taken) {
+            $message = 'That username is already taken.';
+            $message_type = 'error';
+        } elseif (!$saved) {
+            $message = 'Could not save your request — please try again later.';
+            $message_type = 'error';
+        } else {
             $submitted = true;
 
             $subject = 'Morning Dashboard: access request from ' . $username;

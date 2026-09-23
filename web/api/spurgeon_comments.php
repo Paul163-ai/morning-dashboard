@@ -11,8 +11,9 @@ function load_comments(string $file): array {
     return is_array($data) ? $data : [];
 }
 
-function save_comments(string $file, array $data): bool {
-    return save_json($file, $data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+// Locked read-modify-write of the shared comments file (see update_json()).
+function update_comments(string $file, callable $fn): bool {
+    return update_json($file, $fn, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
 }
 
 // Spurgeon's Morning & Evening repeats on the same month-day every year, so
@@ -37,16 +38,17 @@ if ($method === 'GET') {
     $text = clip_text(trim($body['text'] ?? ''), 8000);
     if ($text === '') { http_response_code(400); echo json_encode(['error' => 'empty']); exit; }
 
-    $data = load_comments($comments_file);
-    if (!isset($data[$key])) $data[$key] = [];
     $comment = [
         'id'        => bin2hex(random_bytes(8)),
         'username'  => $user,
         'text'      => $text,
         'timestamp' => time(),
     ];
-    $data[$key][] = $comment;
-    if (!save_comments($comments_file, $data)) {
+    $saved = update_comments($comments_file, function ($data) use ($key, $comment) {
+        $data[$key][] = $comment;
+        return $data;
+    });
+    if (!$saved) {
         http_response_code(500);
         echo json_encode(['error' => 'Could not save comment']);
         exit;
@@ -58,15 +60,14 @@ if ($method === 'GET') {
     $key = md_key(preg_replace('/[^0-9\-]/', '', $body['date'] ?? ''));
     $id  = preg_replace('/[^a-f0-9]/', '', $body['id']   ?? '');
 
-    $data = load_comments($comments_file);
-    if (!isset($data[$key])) { echo json_encode(['ok' => true]); exit; }
-
-    $data[$key] = array_values(array_filter($data[$key], function ($c) use ($id, $user) {
-        if ($c['id'] !== $id) return true;
-        return !($c['username'] === $user || $user === ADMIN_USER);
-    }));
-
-    save_comments($comments_file, $data);
+    update_comments($comments_file, function ($data) use ($key, $id, $user) {
+        if (!isset($data[$key])) return null;
+        $data[$key] = array_values(array_filter($data[$key], function ($c) use ($id, $user) {
+            if ($c['id'] !== $id) return true;
+            return !($c['username'] === $user || $user === ADMIN_USER);
+        }));
+        return $data;
+    });
     echo json_encode(['ok' => true]);
 } else {
     http_response_code(405);

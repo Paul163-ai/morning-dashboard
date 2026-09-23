@@ -27,6 +27,14 @@ DATA_DIR       = PROJECT_DIR if os.access(PROJECT_DIR, os.W_OK) else os.path.joi
 os.makedirs(DATA_DIR, exist_ok=True)
 CREDENTIALS    = os.path.join(DATA_DIR, "credentials.json")
 TOKEN_FILE     = os.path.join(DATA_DIR, "token.json")
+
+def write_private(path, text):
+    """Write a file readable only by the user (prefs hold passwords/API keys,
+    token.json holds Google OAuth tokens)."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)  # O_CREAT's mode doesn't apply to an existing file
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
 DRIVE_FOLDER = "Morning Dashboard Backup"
 
 def get_drive_service():
@@ -44,8 +52,7 @@ def get_drive_service():
         else:
             flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS, SCOPES)
             creds = flow.run_local_server(port=0)
-        with open(TOKEN_FILE, "w") as f:
-            f.write(creds.to_json())
+        write_private(TOKEN_FILE, creds.to_json())
     return build("drive", "v3", credentials=creds)
 
 def get_or_create_folder(service, name):
@@ -1627,8 +1634,16 @@ def load_prefs():
 
 def save_prefs(prefs):
     os.makedirs(os.path.dirname(PREFS_FILE), exist_ok=True)
-    with open(PREFS_FILE, "w") as f:
-        json.dump(prefs, f)
+    write_private(PREFS_FILE, json.dumps(prefs))
+
+# Tighten files written by older versions with default (group/world-readable)
+# permissions.
+for _secret in (PREFS_FILE, TOKEN_FILE, CREDENTIALS):
+    try:
+        if os.path.exists(_secret):
+            os.chmod(_secret, 0o600)
+    except OSError:
+        pass
 
 def load_spurgeon_cache():
     try:
@@ -3264,6 +3279,7 @@ X-GNOME-Autostart-enabled=true
                     for fname in os.listdir(sermons_dir):
                         if fname.endswith(".txt"):
                             zf.write(os.path.join(sermons_dir, fname), f"sermons/{fname}")
+            os.chmod(path, 0o600)  # contains prefs.json, i.e. passwords/API keys
             if hasattr(self, "_backup_status"):
                 self._backup_status.set_text(f"✅ Exported to {os.path.basename(path)}")
         except Exception as e:
@@ -4908,6 +4924,10 @@ X-GNOME-Autostart-enabled=true
                 self.news_box.append(btn)
 
     def _open_link(self, btn, url):
+        # Links come from third-party RSS feeds; only hand web URLs to
+        # xdg-open (not file:, local paths or other schemes).
+        if not url.lower().startswith(("http://", "https://")):
+            return
         import subprocess
         subprocess.Popen(["xdg-open", url])
 
