@@ -19,7 +19,7 @@ if ($user !== null && $_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         if (write_htpasswd(HTPASSWD_FILE, $user, $password)) {
             invalidate_password_reset_token($token);
-            invalidate_all_remember_tokens_for_user($user);
+            revoke_logins($user);
             header('Location: /login.php?reset=1');
             exit;
         }

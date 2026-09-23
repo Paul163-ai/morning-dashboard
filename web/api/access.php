@@ -8,17 +8,35 @@ $body          = json_decode(file_get_contents('php://input'), true) ?? [];
 $action        = $body['action'] ?? $_GET['action'] ?? '';
 
 // change_password is available to any logged-in user
+// Requires the current password, so a hijacked session can't take over the
+// account. Wrong guesses count toward the shared per-IP login lockout. Errors
+// are 200 + {error} so the settings panel can show the message.
 if ($action === 'change_password') {
     $current_user = current_user();
     $new_pass     = $body['new_password'] ?? '';
+    $ip           = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    if (_login_attempts($ip) >= LOGIN_MAX_ATTEMPTS) {
+        echo json_encode(['error' => 'Too many failed attempts — try again in 15 minutes.']);
+        exit;
+    }
+    if (!verify_htpasswd($current_user, $body['current_password'] ?? '')) {
+        _record_failed_attempt($ip);
+        log_login_event($current_user, $ip, 'change_pw', false);
+        echo json_encode(['error' => 'Current password is incorrect.']);
+        exit;
+    }
     if (strlen($new_pass) < 8) {
         http_response_code(400);
         echo json_encode(['error' => 'Password must be at least 8 characters.']);
         exit;
     }
-    echo json_encode(write_htpasswd(HTPASSWD_FILE, $current_user, $new_pass)
-        ? ['ok' => true]
-        : ['error' => 'Could not write to .htpasswd — check the path in config.php']);
+    if (!write_htpasswd(HTPASSWD_FILE, $current_user, $new_pass)) {
+        echo json_encode(['error' => 'Could not write to .htpasswd — check the path in config.php']);
+        exit;
+    }
+    // Log out every other browser/device; this one stays logged in.
+    revoke_logins($current_user);
+    echo json_encode(['ok' => true]);
     exit;
 }
 
@@ -161,6 +179,7 @@ if ($action === 'list') {
         echo json_encode(['error' => 'Could not write to .htpasswd — check the path in config.php']);
         exit;
     }
+    revoke_logins($username);
     echo json_encode(['ok' => true, 'username' => $username, 'password' => $new_password]);
 
 } elseif ($action === 'delete_user') {
@@ -175,6 +194,10 @@ if ($action === 'list') {
     $lines = read_htpasswd_lines();
     $lines = array_values(array_filter($lines, fn($l) => !str_starts_with($l, $username . ':')));
     file_put_contents(HTPASSWD_FILE, implode("\n", $lines) . "\n");
+
+    // End their open sessions and remember-me cookies, which would otherwise
+    // keep working (and recreate the data dir) after the account is gone.
+    revoke_logins($username);
 
     // Remove user data directory
     $user_dir = __DIR__ . '/../data/users/' . $username;

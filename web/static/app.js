@@ -2792,6 +2792,12 @@ function renderSettingsBody() {
 
     // Change password (all users)
     body.appendChild(el('div', { class: 'settings-section-label' }, 'CHANGE PASSWORD'));
+    const pwRow0 = el('div', { class: 'settings-row' });
+    pwRow0.appendChild(el('label', {}, 'Current password:'));
+    const pwCur = el('input', { type: 'password', class: 'settings-input flex-1', autocomplete: 'current-password' });
+    pwRow0.appendChild(pwCur);
+    body.appendChild(pwRow0);
+
     const pwRow1 = el('div', { class: 'settings-row' });
     pwRow1.appendChild(el('label', {}, 'New password:'));
     const pwInp = el('input', { type: 'password', class: 'settings-input flex-1', placeholder: 'At least 8 characters' });
@@ -2806,18 +2812,19 @@ function renderSettingsBody() {
 
     const pwStatus = el('div', { style: 'font-size:12px;min-height:18px' });
     const pwBtn = el('button', { class: 'sermon-btn', style: 'margin-left:0', onclick: async () => {
-        const p1 = pwInp.value, p2 = pwInp2.value;
+        const cur = pwCur.value, p1 = pwInp.value, p2 = pwInp2.value;
         if (!p1) return;
+        if (!cur) { pwStatus.style.color='#ef5350'; pwStatus.textContent='Enter your current password.'; return; }
         if (p1 !== p2) { pwStatus.style.color='#ef5350'; pwStatus.textContent='Passwords do not match.'; return; }
         if (p1.length < 8) { pwStatus.style.color='#ef5350'; pwStatus.textContent='Must be at least 8 characters.'; return; }
         try {
             const res = await api('access.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'change_password', new_password: p1 }),
+                body: JSON.stringify({ action: 'change_password', current_password: cur, new_password: p1 }),
             });
             if (res.error) { pwStatus.style.color='#ef5350'; pwStatus.textContent='❌ ' + res.error; }
-            else { pwStatus.style.color='#66bb6a'; pwStatus.textContent='✅ Password changed.'; pwInp.value=''; pwInp2.value=''; }
+            else { pwStatus.style.color='#66bb6a'; pwStatus.textContent='✅ Password changed — other devices have been logged out.'; pwCur.value=''; pwInp.value=''; pwInp2.value=''; }
         } catch(e) { pwStatus.style.color='#ef5350'; pwStatus.textContent='❌ ' + e.message; }
     } }, 'Update password');
     body.appendChild(el('div', { class: 'settings-row' }, pwBtn, pwStatus));

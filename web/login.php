@@ -20,17 +20,9 @@ if (!$locked && $_SERVER['REQUEST_METHOD'] === 'POST') {
         _clear_failed_attempts($ip);
         session_regenerate_id(true);
         $_SESSION['user'] = preg_replace('/[^a-zA-Z0-9_\-]/', '', $username);
+        $_SESSION['auth_time'] = time();
         log_login_event($_SESSION['user'], $ip, 'form', true);
-        if ($remember) {
-            $token = create_remember_token($_SESSION['user']);
-            setcookie('remember_me', $token, [
-                'expires'  => time() + REMEMBER_ME_DURATION,
-                'path'     => '/',
-                'secure'   => true,
-                'httponly' => true,
-                'samesite' => 'Lax',
-            ]);
-        }
+        if ($remember) issue_remember_cookie($_SESSION['user']);
         header('Location: /');
         exit;
     }

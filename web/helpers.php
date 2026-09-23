@@ -97,6 +97,41 @@ function invalidate_remember_token(string $token): void {
     }
 }
 
+// Set a fresh remember-me cookie for $username on this browser.
+function issue_remember_cookie(string $username): void {
+    setcookie('remember_me', create_remember_token($username), ['expires' => time() + REMEMBER_ME_DURATION, 'path' => '/', 'secure' => true, 'httponly' => true, 'samesite' => 'Lax']);
+}
+
+// --- Revoking logins ---
+// Sessions record when they logged in ($_SESSION['auth_time']); require_auth()
+// drops any session older than the user's last revocation. Used on password
+// change/reset and account deletion so other devices are logged out.
+
+function _logins_revoked_file(): string {
+    return __DIR__ . '/data/logins_revoked.json';
+}
+
+function logins_revoked_at(string $username): int {
+    $file = _logins_revoked_file();
+    if (!file_exists($file)) return 0;
+    $data = json_decode(file_get_contents($file), true) ?: [];
+    return (int)($data[$username] ?? 0);
+}
+
+function revoke_logins(string $username): void {
+    invalidate_all_remember_tokens_for_user($username);
+    $file = _logins_revoked_file();
+    $data = file_exists($file) ? (json_decode(file_get_contents($file), true) ?: []) : [];
+    $data[$username] = time();
+    save_json($file, $data);
+    // A user revoking their own logins (changing their password) stays logged
+    // in on this browser, including its remember-me cookie if it had one.
+    if (($_SESSION['user'] ?? '') === $username) {
+        $_SESSION['auth_time'] = time();
+        if (!empty($_COOKIE['remember_me'])) issue_remember_cookie($username);
+    }
+}
+
 // --- Password reset tokens ---
 
 const PASSWORD_RESET_DURATION = 3600; // 1 hour
@@ -300,7 +335,12 @@ function _is_api_request(): bool {
 function require_auth(): void {
     global $_MD_AUTH_USER;
 
-    if (!empty($_SESSION['user'])) return;
+    if (!empty($_SESSION['user'])) {
+        if (($_SESSION['auth_time'] ?? 0) >= logins_revoked_at($_SESSION['user'])) return;
+        // Logins revoked since this session started (password changed or
+        // account deleted) — drop it and fall through as if logged out.
+        unset($_SESSION['user'], $_SESSION['auth_time']);
+    }
 
     // Check remember-me cookie
     $token = $_COOKIE['remember_me'] ?? '';
@@ -308,9 +348,9 @@ function require_auth(): void {
         $user = validate_remember_token($token);
         if ($user !== null) {
             invalidate_remember_token($token);
-            $new_token = create_remember_token($user);
-            setcookie('remember_me', $new_token, ['expires' => time() + REMEMBER_ME_DURATION, 'path' => '/', 'secure' => true, 'httponly' => true, 'samesite' => 'Lax']);
+            issue_remember_cookie($user);
             $_SESSION['user'] = $user;
+            $_SESSION['auth_time'] = time();
             log_login_event($user, $_SERVER['REMOTE_ADDR'] ?? 'unknown', 'remember', true);
             return;
         }

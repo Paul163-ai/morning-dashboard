@@ -77,7 +77,7 @@ root (Gtk.Box, vertical)
 **Entry point:** `web/index.php` — PHP shell that injects `window.INIT_PREFS` and `window.IS_ADMIN` as globals for `app.js`. Tab panels are empty `<div>` elements; all content is rendered client-side.
 
 **Auth:** Two auth paths, both handled in `helpers.php` by `require_auth()` (called automatically at include time):
-- **Browser:** PHP session (`$_SESSION['user']`) set on login. Remember-me cookie (`remember_me`) backed by `data/remember_tokens.json` (64-char random hex, 30-day expiry, rotated on every use).
+- **Browser:** PHP session (`$_SESSION['user']`) set on login. Remember-me cookie (`remember_me`) backed by `data/remember_tokens.json` (64-char random hex, 10-year expiry — deliberately "effectively unlimited" — rotated on every use). Sessions store `auth_time`; `revoke_logins()` (on password change/reset and account deletion) deletes the user's remember-me tokens and records a timestamp in `data/logins_revoked.json`, and `require_auth()` drops any session that logged in before it. The browser that changed its own password stays logged in.
 - **Desktop app:** HTTP Basic Auth — credentials verified against `.htpasswd` (APR1-MD5 hashes; bcrypt dropped for shared-hosting compatibility) via `verify_htpasswd()`. Sets `$_MD_AUTH_USER` for the request scope; never touches the session. Failures count toward the same per-IP lockout as the login form (5 in 15 min, `data/login_attempts.json`); once locked, Basic Auth gets HTTP 429 even with the right password.
 
 `config.php` defines `ADMIN_USER` ('paul') and `HTPASSWD_FILE`. `helpers.php` provides `current_user()`, `is_authenticated()`, and `user_data_dir()`.
@@ -97,7 +97,7 @@ root (Gtk.Box, vertical)
 - `news.php` — BBC/Hacker News RSS
 - `weather.php` — Open-Meteo (no key needed)
 - `sermons.php` — per-user sermon files
-- `access.php` — user management: `list`, `list_users`, `approve` (generates 16-char random password), `deny`, `delete_user`, `change_password`
+- `access.php` — user management: `list`, `list_users`, `approve` (writes the password hash chosen at request time), `deny`, `reset_password` (admin; generates 16-char random password), `delete_user`, `change_password` (requires `current_password`; wrong guesses count toward the login lockout), `set_email`
 
 **Access request system:** `request.php` is public (auth exempt). Submissions go to `data/access_requests.json`. Rate limited to 3/IP/hour via `data/rate_limit.json`. Admin approves/denies via `api/access.php`.
 
