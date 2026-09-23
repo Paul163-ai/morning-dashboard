@@ -57,7 +57,7 @@ $init_prefs = json_encode([
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>☀️ Morning Dashboard</title>
+    <title>Morning Dashboard</title>
     <link rel="icon" type="image/png" href="static/favicon.png">
     <link rel="stylesheet" href="static/style.css">
     <style>
