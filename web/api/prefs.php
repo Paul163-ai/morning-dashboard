@@ -14,7 +14,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $prefs = [];
     $prefs['theme']             = in_array($body['theme'] ?? 'dark', ['dark','light']) ? $body['theme'] : 'dark';
     $prefs['font_size']         = max(9, min(24, (int)($body['font_size'] ?? 13)));
-    $prefs['weather_location']  = substr(strip_tags($body['weather_location'] ?? ''), 0, 200);
+    $prefs['weather_location']  = clip_text(strip_tags($body['weather_location'] ?? ''), 200);
     $prefs['weather_lat']       = isset($body['weather_lat'])  ? (float)$body['weather_lat']  : null;
     $prefs['weather_lon']       = isset($body['weather_lon'])  ? (float)$body['weather_lon']  : null;
     // Preserve existing key if nothing new was submitted
@@ -33,7 +33,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $prefs['tab_order']    = array_values($tab_order);
     $prefs['visible_tabs'] = array_values($visible_tabs);
 
-    file_put_contents($file, json_encode($prefs, JSON_PRETTY_PRINT));
+    if (!save_json($file, $prefs, JSON_PRETTY_PRINT)) {
+        http_response_code(500);
+        echo json_encode(['error' => 'Could not save prefs']);
+        exit;
+    }
     echo json_encode(['ok' => true]);
 } else {
     if (file_exists($file)) {

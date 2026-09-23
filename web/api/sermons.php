@@ -7,7 +7,7 @@ $sermons_dir = user_data_dir() . '/sermons';
 function safe_filename(string $title): string {
     $name = preg_replace('/[\/\\\\:*?"<>|]/', '-', $title);
     $name = trim($name, '. ');
-    return substr($name, 0, 200) . '.txt';
+    return clip_text($name, 200) . '.txt';
 }
 
 $method = $_SERVER['REQUEST_METHOD'];

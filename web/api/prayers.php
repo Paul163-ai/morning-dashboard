@@ -10,7 +10,7 @@ $extrasFile = user_data_dir() . '/prayer_extras.json';
 $DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
 function clean_text($v, $max) {
-    return substr(strip_tags((string)$v), 0, $max);
+    return clip_text($v, $max);
 }
 
 function sanitize_day_map($map, $max) {
@@ -59,12 +59,12 @@ function sanitize_prayer_list($list) {
     return array_values(array_map(function($p) {
         $children = array_values(array_map(function($c) {
             return [
-                'text' => substr(strip_tags($c['text'] ?? ''), 0, 500),
+                'text' => clip_text($c['text'] ?? '', 500),
                 'done' => (bool)($c['done'] ?? false),
             ];
         }, $p['children'] ?? []));
         return [
-            'text'     => substr(strip_tags($p['text'] ?? ''), 0, 500),
+            'text'     => clip_text($p['text'] ?? '', 500),
             'done'     => (bool)($p['done'] ?? false),
             'children' => $children,
         ];
@@ -86,15 +86,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $weekly[$day] = sanitize_prayer_list($weeklyIn[$day] ?? []);
     }
 
-    file_put_contents($file, json_encode(
-        ['prayers' => $prayers, 'weekly_prayers' => $weekly],
-        JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE
-    ));
-    if (isset($body['extras']) && is_array($body['extras'])) {
-        file_put_contents($extrasFile, json_encode(
-            sanitize_extras($body['extras']),
-            JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE
-        ));
+    $ok = save_json($file, ['prayers' => $prayers, 'weekly_prayers' => $weekly],
+                    JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    if ($ok && isset($body['extras']) && is_array($body['extras'])) {
+        $ok = save_json($extrasFile, sanitize_extras($body['extras']),
+                        JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    }
+    if (!$ok) {
+        http_response_code(500);
+        echo json_encode(['error' => 'Could not save prayers']);
+        exit;
     }
     echo json_encode(['ok' => true]);
 } else {

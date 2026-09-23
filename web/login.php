@@ -6,39 +6,6 @@ if (!empty($_SESSION['user'])) {
     exit;
 }
 
-define('LOGIN_ATTEMPTS_FILE', __DIR__ . '/data/login_attempts.json');
-define('LOGIN_MAX_ATTEMPTS', 5);
-define('LOGIN_WINDOW', 900); // 15 minutes
-
-function _login_attempts(string $ip): int {
-    if (!file_exists(LOGIN_ATTEMPTS_FILE)) return 0;
-    $data = json_decode(file_get_contents(LOGIN_ATTEMPTS_FILE), true) ?: [];
-    $cutoff = time() - LOGIN_WINDOW;
-    $count  = 0;
-    foreach ($data as $key => $ts) {
-        if ($ts >= $cutoff && ($key === $ip || str_starts_with($key, $ip . '_'))) $count++;
-    }
-    return $count;
-}
-
-function _record_failed_attempt(string $ip): void {
-    $data   = file_exists(LOGIN_ATTEMPTS_FILE) ? (json_decode(file_get_contents(LOGIN_ATTEMPTS_FILE), true) ?: []) : [];
-    $now    = time();
-    $cutoff = $now - LOGIN_WINDOW;
-    $data   = array_filter($data, fn($t) => $t >= $cutoff);
-    $data[$ip . '_' . $now] = $now;
-    file_put_contents(LOGIN_ATTEMPTS_FILE, json_encode($data), LOCK_EX);
-}
-
-function _clear_failed_attempts(string $ip): void {
-    if (!file_exists(LOGIN_ATTEMPTS_FILE)) return;
-    $data = json_decode(file_get_contents(LOGIN_ATTEMPTS_FILE), true) ?: [];
-    foreach (array_keys($data) as $key) {
-        if ($key === $ip || str_starts_with($key, $ip . '_')) unset($data[$key]);
-    }
-    file_put_contents(LOGIN_ATTEMPTS_FILE, json_encode($data), LOCK_EX);
-}
-
 $ip      = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
 $locked  = _login_attempts($ip) >= LOGIN_MAX_ATTEMPTS;
 $error   = $locked ? 'Too many failed attempts — try again in 15 minutes.' : '';

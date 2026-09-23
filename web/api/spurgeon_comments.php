@@ -11,8 +11,8 @@ function load_comments(string $file): array {
     return is_array($data) ? $data : [];
 }
 
-function save_comments(string $file, array $data): void {
-    file_put_contents($file, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+function save_comments(string $file, array $data): bool {
+    return save_json($file, $data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
 }
 
 // Spurgeon's Morning & Evening repeats on the same month-day every year, so
@@ -34,7 +34,7 @@ if ($method === 'GET') {
 } elseif ($method === 'POST') {
     $body = json_decode(file_get_contents('php://input'), true);
     $key  = md_key(preg_replace('/[^0-9\-]/', '', $body['date'] ?? date('Y-m-d')));
-    $text = substr(trim($body['text'] ?? ''), 0, 8000);
+    $text = clip_text(trim($body['text'] ?? ''), 8000);
     if ($text === '') { http_response_code(400); echo json_encode(['error' => 'empty']); exit; }
 
     $data = load_comments($comments_file);
@@ -46,7 +46,11 @@ if ($method === 'GET') {
         'timestamp' => time(),
     ];
     $data[$key][] = $comment;
-    save_comments($comments_file, $data);
+    if (!save_comments($comments_file, $data)) {
+        http_response_code(500);
+        echo json_encode(['error' => 'Could not save comment']);
+        exit;
+    }
     echo json_encode(['ok' => true, 'comment' => $comment]);
 
 } elseif ($method === 'DELETE') {

@@ -54,7 +54,7 @@ function load_requests(string $file): array {
 }
 
 function save_requests(string $file, array $requests): void {
-    file_put_contents($file, json_encode(array_values($requests), JSON_PRETTY_PRINT));
+    save_json($file, array_values($requests), JSON_PRETTY_PRINT);
 }
 
 function read_htpasswd_lines(): array {
@@ -91,6 +91,9 @@ if ($action === 'list') {
 } elseif ($action === 'approve') {
     $username = preg_replace('/[^a-zA-Z0-9_\-]/', '', $body['username'] ?? '');
     if (!$username) { http_response_code(400); echo json_encode(['error' => 'No username']); exit; }
+    if (in_array(strtolower($username), RESERVED_USERNAMES, true)) {
+        http_response_code(400); echo json_encode(['error' => 'That username is reserved.']); exit;
+    }
 
     // Find the pending request to check for a pre-hashed password
     $requests     = load_requests($requests_file);

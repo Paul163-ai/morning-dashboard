@@ -2,6 +2,9 @@
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../helpers.php';
 
+// Release the session lock before the slow upstream fetches below — see spurgeon.php.
+session_write_close();
+
 function curl_json(string $url): array {
     $ch = curl_init($url);
     curl_setopt_array($ch, [

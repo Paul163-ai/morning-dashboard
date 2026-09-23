@@ -16,6 +16,10 @@ $_MD_AUTH_USER = null;
 // "Remember me" token/cookie lifetime — effectively unlimited (10 years).
 const REMEMBER_ME_DURATION = 10 * 365 * 24 * 3600;
 
+// current_user() falls back to 'default' when nobody is logged in, so no real
+// account may take that name (checked by request.php and access.php approve).
+const RESERVED_USERNAMES = ['default'];
+
 function current_user(): string {
     global $_MD_AUTH_USER;
     $user = $_MD_AUTH_USER ?? ($_SESSION['user'] ?? '');
@@ -32,6 +36,22 @@ function user_data_dir(): string {
     if (!is_dir($base))            mkdir($base,             0755, true);
     if (!is_dir($base.'/sermons')) mkdir($base.'/sermons',  0755, true);
     return $base;
+}
+
+// --- Safe text/JSON handling ---
+
+// Truncate to $max characters without splitting a multi-byte UTF-8 sequence
+// (substr() cuts bytes, and a half character makes json_encode() fail).
+function clip_text($s, int $max): string {
+    return mb_substr(mb_scrub((string)$s, 'UTF-8'), 0, $max, 'UTF-8');
+}
+
+// Encode and write JSON, refusing to write if encoding fails — otherwise
+// file_put_contents(false) would silently truncate the file to empty.
+function save_json(string $file, $data, int $flags = 0): bool {
+    $json = json_encode($data, $flags | JSON_INVALID_UTF8_SUBSTITUTE);
+    if ($json === false) return false;
+    return file_put_contents($file, $json, LOCK_EX) !== false;
 }
 
 // --- Remember-me tokens ---
@@ -193,6 +213,48 @@ function record_guest_visit(string $ip): void {
     file_put_contents($file, json_encode($data), LOCK_EX);
 }
 
+// --- Failed-login lockout (by IP) ---
+// Shared by the login form (login.php) and HTTP Basic Auth in require_auth(),
+// so the desktop-app auth path can't be used to bypass the form's lockout.
+
+const LOGIN_ATTEMPTS_FILE = __DIR__ . '/data/login_attempts.json';
+const LOGIN_MAX_ATTEMPTS  = 5;
+const LOGIN_WINDOW        = 900; // 15 minutes
+
+function _login_attempts(string $ip): int {
+    if (!file_exists(LOGIN_ATTEMPTS_FILE)) return 0;
+    $data = json_decode(file_get_contents(LOGIN_ATTEMPTS_FILE), true) ?: [];
+    $cutoff = time() - LOGIN_WINDOW;
+    $count  = 0;
+    foreach ($data as $key => $ts) {
+        if ($ts >= $cutoff && ($key === $ip || str_starts_with($key, $ip . '_'))) $count++;
+    }
+    return $count;
+}
+
+function _record_failed_attempt(string $ip): void {
+    $data   = file_exists(LOGIN_ATTEMPTS_FILE) ? (json_decode(file_get_contents(LOGIN_ATTEMPTS_FILE), true) ?: []) : [];
+    $now    = time();
+    $cutoff = $now - LOGIN_WINDOW;
+    $data   = array_filter($data, fn($t) => $t >= $cutoff);
+    // Several failures can land in the same second (the desktop app fires
+    // requests in parallel), so make each key unique rather than overwrite.
+    $key = $ip . '_' . $now;
+    for ($n = 1; isset($data[$key]); $n++) $key = $ip . '_' . $now . '_' . $n;
+    $data[$key] = $now;
+    file_put_contents(LOGIN_ATTEMPTS_FILE, json_encode($data), LOCK_EX);
+}
+
+function _clear_failed_attempts(string $ip): void {
+    if (!file_exists(LOGIN_ATTEMPTS_FILE)) return;
+    $data = json_decode(file_get_contents(LOGIN_ATTEMPTS_FILE), true) ?: [];
+    $changed = false;
+    foreach (array_keys($data) as $key) {
+        if ($key === $ip || str_starts_with($key, $ip . '_')) { unset($data[$key]); $changed = true; }
+    }
+    if ($changed) file_put_contents(LOGIN_ATTEMPTS_FILE, json_encode($data), LOCK_EX);
+}
+
 // --- Auth ---
 
 function verify_htpasswd(string $username, string $password): bool {
@@ -260,10 +322,26 @@ function require_auth(): void {
     $creds = _get_basic_auth_credentials();
     if ($creds !== null) {
         [$user, $pass] = $creds;
+        $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+        $attempts = _login_attempts($ip);
+        // Locked out: reject without checking the password, even a correct
+        // one, so guessing can't continue during the lockout window.
+        if ($attempts >= LOGIN_MAX_ATTEMPTS) {
+            if (!headers_sent()) {
+                header('Content-Type: application/json; charset=utf-8');
+                header('Retry-After: ' . LOGIN_WINDOW);
+            }
+            http_response_code(429);
+            echo json_encode(['error' => 'Too many failed attempts — try again in 15 minutes.']);
+            exit;
+        }
         if (verify_htpasswd($user, $pass)) {
+            if ($attempts > 0) _clear_failed_attempts($ip);
             $_MD_AUTH_USER = $user;
             return;
         }
+        _record_failed_attempt($ip);
+        log_login_event($user !== '' ? clip_text($user, 64) : '?', $ip, 'basic', false);
     }
 
     // Not authenticated

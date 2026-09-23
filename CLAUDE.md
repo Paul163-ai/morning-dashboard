@@ -74,7 +74,7 @@ root (Gtk.Box, vertical)
 
 **Auth:** Two auth paths, both handled in `helpers.php` by `require_auth()` (called automatically at include time):
 - **Browser:** PHP session (`$_SESSION['user']`) set on login. Remember-me cookie (`remember_me`) backed by `data/remember_tokens.json` (64-char random hex, 30-day expiry, rotated on every use).
-- **Desktop app:** HTTP Basic Auth — credentials verified against `.htpasswd` (APR1-MD5 hashes; bcrypt dropped for shared-hosting compatibility) via `verify_htpasswd()`. Sets `$_MD_AUTH_USER` for the request scope; never touches the session.
+- **Desktop app:** HTTP Basic Auth — credentials verified against `.htpasswd` (APR1-MD5 hashes; bcrypt dropped for shared-hosting compatibility) via `verify_htpasswd()`. Sets `$_MD_AUTH_USER` for the request scope; never touches the session. Failures count toward the same per-IP lockout as the login form (5 in 15 min, `data/login_attempts.json`); once locked, Basic Auth gets HTTP 429 even with the right password.
 
 `config.php` defines `ADMIN_USER` ('paul') and `HTPASSWD_FILE`. `helpers.php` provides `current_user()`, `is_authenticated()`, and `user_data_dir()`.
 

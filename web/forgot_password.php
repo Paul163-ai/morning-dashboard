@@ -34,7 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $email = get_user_email($resolved);
             if ($email) {
                 $token = create_password_reset_token($resolved);
-                $link  = 'https://' . ($_SERVER['HTTP_HOST'] ?? 'md.paullintott.uk') . '/reset_password.php?token=' . $token;
+                $link  = APP_URL . '/reset_password.php?token=' . $token;
                 $subject = 'Morning Dashboard: password reset';
                 $body    = "We received a request to reset the password for your Morning Dashboard account ($resolved).\n\n"
                          . "Reset it here (valid for 1 hour):\n$link\n\n"

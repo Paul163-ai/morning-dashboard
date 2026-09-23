@@ -2,6 +2,9 @@
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../helpers.php';
 
+// Release the session lock before the slow upstream fetches below — see spurgeon.php.
+session_write_close();
+
 // proxy=true: fetched via rss2json.com (for feeds behind Cloudflare)
 $SOURCES = [
     'BBC News'         => ['url' => 'https://feeds.bbci.co.uk/news/rss.xml',               'proxy' => false],

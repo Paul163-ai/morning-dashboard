@@ -1,3 +1,91 @@
+<?php
+require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/helpers.php';
+
+$requests_file   = __DIR__ . '/data/access_requests.json';
+$rate_limit_file = __DIR__ . '/data/rate_limit.json';
+$message      = '';
+$message_type = '';
+$submitted    = false;
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    if (!check_rate_limit($rate_limit_file, $ip)) {
+        $message = 'Too many requests — please try again later.';
+        $message_type = 'error';
+        goto render;
+    }
+    $username = preg_replace('/[^a-zA-Z0-9_\-]/', '', trim($_POST['username'] ?? ''));
+    $name     = clip_text(strip_tags(trim($_POST['name']     ?? '')), 100);
+    $email    = clip_text(strip_tags(trim($_POST['email']    ?? '')), 200);
+    $reason   = clip_text(strip_tags(trim($_POST['reason']   ?? '')), 500);
+    $password  = $_POST['password']  ?? '';
+    $password2 = $_POST['password2'] ?? '';
+
+    if (!$username || !$name) {
+        $message = 'Please fill in your username and name.';
+        $message_type = 'error';
+    } elseif (in_array(strtolower($username), RESERVED_USERNAMES, true)) {
+        $message = 'That username is not available.';
+        $message_type = 'error';
+    } elseif (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $message = 'Please enter a valid email address.';
+        $message_type = 'error';
+    } elseif (strlen($password) < 8) {
+        $message = 'Password must be at least 8 characters.';
+        $message_type = 'error';
+    } elseif ($password !== $password2) {
+        $message = 'Passwords do not match.';
+        $message_type = 'error';
+    } else {
+        $requests = file_exists($requests_file)
+            ? (json_decode(file_get_contents($requests_file), true) ?: [])
+            : [];
+
+        // Check for duplicate pending request or existing account
+        $already = array_filter($requests, fn($r) => $r['username'] === $username && $r['status'] === 'pending');
+        $taken = false;
+        if (file_exists(HTPASSWD_FILE)) {
+            foreach (file(HTPASSWD_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+                if (str_starts_with($line, $username . ':')) { $taken = true; break; }
+            }
+        }
+        if ($already || $taken) {
+            $message = 'That username is already taken.';
+            $message_type = 'error';
+        } else {
+            $requests[] = [
+                'username'      => $username,
+                'name'          => $name,
+                'email'         => $email,
+                'reason'        => $reason,
+                'password_hash' => apr1_md5($password),
+                'requested'     => date('Y-m-d H:i:s'),
+                'status'        => 'pending',
+            ];
+            if (!save_json($requests_file, $requests, JSON_PRETTY_PRINT)) {
+                $message = 'Could not save your request — please try again later.';
+                $message_type = 'error';
+                goto render;
+            }
+            $submitted = true;
+
+            $subject = 'Morning Dashboard: access request from ' . $username;
+            $body    = "New access request received.\n\n"
+                     . "Username: $username\n"
+                     . "Name: $name\n"
+                     . "Email: " . ($email ?: '(not provided)') . "\n"
+                     . "Reason: " . ($reason ?: '(not provided)') . "\n"
+                     . "Requested: " . date('Y-m-d H:i:s') . "\n\n"
+                     . "Approve or deny via the admin panel.";
+            $headers = 'From: Morning Dashboard <' . ADMIN_EMAIL . ">\r\n"
+                     . 'Content-Type: text/plain; charset=UTF-8';
+            @mail(ADMIN_EMAIL, $subject, $body, $headers);
+        }
+    }
+}
+render:
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -38,87 +126,6 @@
     </style>
 </head>
 <body>
-<?php
-require_once __DIR__ . '/config.php';
-require_once __DIR__ . '/helpers.php';
-
-$requests_file   = __DIR__ . '/data/access_requests.json';
-$rate_limit_file = __DIR__ . '/data/rate_limit.json';
-$message      = '';
-$message_type = '';
-$submitted    = false;
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-    if (!check_rate_limit($rate_limit_file, $ip)) {
-        $message = 'Too many requests — please try again later.';
-        $message_type = 'error';
-        goto render;
-    }
-    $username = preg_replace('/[^a-zA-Z0-9_\-]/', '', trim($_POST['username'] ?? ''));
-    $name     = substr(strip_tags(trim($_POST['name']     ?? '')), 0, 100);
-    $email    = substr(strip_tags(trim($_POST['email']    ?? '')), 0, 200);
-    $reason   = substr(strip_tags(trim($_POST['reason']   ?? '')), 0, 500);
-    $password  = $_POST['password']  ?? '';
-    $password2 = $_POST['password2'] ?? '';
-
-    if (!$username || !$name) {
-        $message = 'Please fill in your username and name.';
-        $message_type = 'error';
-    } elseif (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $message = 'Please enter a valid email address.';
-        $message_type = 'error';
-    } elseif (strlen($password) < 8) {
-        $message = 'Password must be at least 8 characters.';
-        $message_type = 'error';
-    } elseif ($password !== $password2) {
-        $message = 'Passwords do not match.';
-        $message_type = 'error';
-    } else {
-        $requests = file_exists($requests_file)
-            ? (json_decode(file_get_contents($requests_file), true) ?: [])
-            : [];
-
-        // Check for duplicate pending request or existing account
-        $already = array_filter($requests, fn($r) => $r['username'] === $username && $r['status'] === 'pending');
-        $taken = false;
-        if (file_exists(HTPASSWD_FILE)) {
-            foreach (file(HTPASSWD_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
-                if (str_starts_with($line, $username . ':')) { $taken = true; break; }
-            }
-        }
-        if ($already || $taken) {
-            $message = 'That username is already taken.';
-            $message_type = 'error';
-        } else {
-            $requests[] = [
-                'username'      => $username,
-                'name'          => $name,
-                'email'         => $email,
-                'reason'        => $reason,
-                'password_hash' => apr1_md5($password),
-                'requested'     => date('Y-m-d H:i:s'),
-                'status'        => 'pending',
-            ];
-            file_put_contents($requests_file, json_encode($requests, JSON_PRETTY_PRINT));
-            $submitted = true;
-
-            $subject = 'Morning Dashboard: access request from ' . $username;
-            $body    = "New access request received.\n\n"
-                     . "Username: $username\n"
-                     . "Name: $name\n"
-                     . "Email: " . ($email ?: '(not provided)') . "\n"
-                     . "Reason: " . ($reason ?: '(not provided)') . "\n"
-                     . "Requested: " . date('Y-m-d H:i:s') . "\n\n"
-                     . "Approve or deny via the admin panel.";
-            $headers = 'From: Morning Dashboard <' . ADMIN_EMAIL . ">\r\n"
-                     . 'Content-Type: text/plain; charset=UTF-8';
-            @mail(ADMIN_EMAIL, $subject, $body, $headers);
-        }
-    }
-}
-render:
-?>
 <div class="card">
     <h1>☀️ Request Access</h1>
     <p class="subtitle">Morning Dashboard — fill in the form and the admin will be in touch.</p>

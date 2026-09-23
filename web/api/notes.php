@@ -6,10 +6,10 @@ $file = user_data_dir() . '/notes.txt';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $body = json_decode(file_get_contents('php://input'), true);
-    $text = substr($body['text'] ?? '', 0, 100000);
+    $text = clip_text($body['text'] ?? '', 100000);
     file_put_contents($file, $text, LOCK_EX);
     echo json_encode(['ok' => true]);
 } else {
     $text = file_exists($file) ? file_get_contents($file) : '';
-    echo json_encode(['text' => $text], JSON_UNESCAPED_UNICODE);
+    echo json_encode(['text' => $text], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
 }

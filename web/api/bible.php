@@ -17,11 +17,18 @@ $book_id     = preg_replace('/[^A-Z0-9]/', '', strtoupper($_GET['book_id']     ?
 $chapter     = max(1, (int)($_GET['chapter']     ?? 1));
 $translation = $_GET['translation'] ?? 'web';
 
-// Read API key server-side — never trust the browser with it
+// Read API key server-side — never trust the browser with it. Guests have no
+// prefs of their own, so they never get a key (and no user dir is created).
 require_once __DIR__ . '/../helpers.php';
-$prefs_file = user_data_dir() . '/prefs.json';
-$prefs      = file_exists($prefs_file) ? (json_decode(file_get_contents($prefs_file), true) ?: []) : [];
-$api_key    = trim($prefs['api_bible_key'] ?? '');
+$api_key = '';
+if (is_authenticated()) {
+    $prefs_file = user_data_dir() . '/prefs.json';
+    $prefs      = file_exists($prefs_file) ? (json_decode(file_get_contents($prefs_file), true) ?: []) : [];
+    $api_key    = trim($prefs['api_bible_key'] ?? '');
+}
+
+// Release the session lock before the slow upstream fetches below — see spurgeon.php.
+session_write_close();
 
 function curl_get_json(string $url, array $headers = []): array {
     $ch = curl_init($url);
