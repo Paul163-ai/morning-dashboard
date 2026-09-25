@@ -80,7 +80,25 @@ let spurgeonOriginalLoaded = false;
 let spurgeonModernLoaded = false;
 
 // Bible state
-let bibleState = { bookIdx: 0, chapter: 1, translation: 'web' };
+let bibleState = { bookIdx: 0, chapter: 1, translation: loadSavedTranslation() };
+
+// Translation persists per user in prefs (guests: this browser's localStorage)
+function loadSavedTranslation() {
+    let code = window.INIT_PREFS && window.INIT_PREFS.bible_translation;
+    if (IS_GUEST) { try { code = localStorage.getItem('bible_translation'); } catch(e) {} }
+    return BIBLE_TRANSLATIONS.some(t => t[1] === code) ? code : 'web';
+}
+
+function setBibleTranslation(code) {
+    if (code === bibleState.translation) return;
+    bibleState.translation = code;
+    if (IS_GUEST) {
+        try { localStorage.setItem('bible_translation', code); } catch(e) {}
+    } else {
+        prefs.bible_translation = code;
+        savePrefsSilent();
+    }
+}
 
 // Prayer state
 let prayerData = [];
@@ -1867,7 +1885,7 @@ function initDaily() {
     BIBLE_TRANSLATIONS.forEach(([name, code]) => transSel.appendChild(el('option', { value: code }, name)));
     transSel.value = bibleState.translation;
     // Translation is shared with the Bible tab
-    transSel.onchange = () => { bibleState.translation = transSel.value; applyBibleState(); dailyRefresh(); };
+    transSel.onchange = () => { setBibleTranslation(transSel.value); applyBibleState(); dailyRefresh(); };
 
     document.getElementById('daily-prev').onclick  = () => dailyNav(-1);
     document.getElementById('daily-next').onclick  = () => dailyNav(+1);
@@ -1975,7 +1993,7 @@ function initBible() {
 
     // Translation select
     const transSel = el('select', { class: 'bible-select', id: 'bible-trans-sel',
-        onchange: () => { bibleState.translation = transSel.value; loadBibleChapter(); } });
+        onchange: () => { setBibleTranslation(transSel.value); loadBibleChapter(); } });
     BIBLE_TRANSLATIONS.forEach(([name, code]) => transSel.appendChild(el('option', { value: code }, name)));
     transSel.value = bibleState.translation;
 

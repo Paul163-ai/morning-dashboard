@@ -25,6 +25,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $prefs['sidebar_collapsed'] = (bool)($body['sidebar_collapsed'] ?? false);
     $spurgeon_version           = $body['spurgeon_version'] ?? 'original';
     $prefs['spurgeon_version']  = in_array($spurgeon_version, ['original','modern'], true) ? $spurgeon_version : 'original';
+    // Translation code shared by the Bible and Daily Bible tabs (e.g. 'web', 'apibible:NIV')
+    $bible_translation          = (string)($body['bible_translation'] ?? 'web');
+    $prefs['bible_translation'] = preg_match('/^[A-Za-z0-9:-]{1,30}$/', $bible_translation) ? $bible_translation : 'web';
 
     $tab_order    = array_filter((array)($body['tab_order']    ?? $ALL_TABS), fn($k) => in_array($k, $ALL_TABS));
     $visible_tabs = array_filter((array)($body['visible_tabs'] ?? $ALL_TABS), fn($k) => in_array($k, $ALL_TABS));
