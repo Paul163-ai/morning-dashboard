@@ -96,6 +96,7 @@ root (Gtk.Box, vertical)
 - `prayers.php` — GET/POST per-user prayers (nested with `children` sub-points)
 - `prefs.php` — per-user prefs; preserves `api_bible_key` if submitted value is empty
 - `bible.php` — bible-api.com (free) + rest.api.bible (CSB/NLT/NIV). The `api_bible_key` is stored server-side only; the browser only receives `api_bible_key_set: bool`
+- ESV comes from api.esv.org with one site-wide key in `data/esv_api_key.txt` (not in `config.php` — the repo is public). Crossway's terms require the copyright notice plus a link to esv.org wherever ESV text shows, so `bible.php` returns `citation_url` alongside `citation`. The desktop app keeps its own `esv_api_key` pref.
 - `news.php` — BBC/Hacker News RSS
 - `weather.php` — Open-Meteo (no key needed)
 - `sermons.php` — per-user sermon files

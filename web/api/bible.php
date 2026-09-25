@@ -13,6 +13,16 @@ $APIBIBLE_CITATIONS = [
     'NIV' => 'The Holy Bible, New International Version® NIV® Copyright © 1973, 1978, 1984, 2011 by Biblica, Inc.® All rights reserved worldwide.',
 ];
 
+// ESV (api.esv.org) — one site-wide key, kept out of git in data/esv_api_key.txt.
+// Crossway's terms require the copyright notice and a link to esv.org on every page showing the text.
+$ESV_CITATION = 'Scripture quotations are from the ESV® Bible (The Holy Bible, English Standard Version®), '
+              . '© 2001 by Crossway, a publishing ministry of Good News Publishers. Used by permission. All rights reserved.';
+$ESV_BOOKS = ['GEN','EXO','LEV','NUM','DEU','JOS','JDG','RUT','1SA','2SA','1KI','2KI','1CH','2CH','EZR','NEH',
+              'EST','JOB','PSA','PRO','ECC','SNG','ISA','JER','LAM','EZK','DAN','HOS','JOL','AMO','OBA','JON',
+              'MIC','NAH','HAB','ZEP','HAG','ZEC','MAL','MAT','MRK','LUK','JHN','ACT','ROM','1CO','2CO','GAL',
+              'EPH','PHP','COL','1TH','2TH','1TI','2TI','TIT','PHM','HEB','JAS','1PE','2PE','1JN','2JN','3JN',
+              'JUD','REV'];
+
 $book_id     = preg_replace('/[^A-Z0-9]/', '', strtoupper($_GET['book_id']     ?? 'GEN'));
 $chapter     = max(1, (int)($_GET['chapter']     ?? 1));
 $translation = $_GET['translation'] ?? 'web';
@@ -49,7 +59,47 @@ function curl_get_json(string $url, array $headers = []): array {
 }
 
 try {
-    if (str_starts_with($translation, 'apibible:')) {
+    if ($translation === 'esv') {
+        $book_num = array_search($book_id, $ESV_BOOKS, true);
+        if ($book_num === false) throw new RuntimeException('Unknown book');
+        $esv_key_file = __DIR__ . '/../data/esv_api_key.txt';
+        $esv_key = file_exists($esv_key_file) ? trim(file_get_contents($esv_key_file)) : '';
+        if (!$esv_key) throw new RuntimeException('ESV is not set up on this server yet.');
+
+        // Verse-ID range (BBCCCVVV) covers the whole chapter, including single-chapter books,
+        // where "Jude 1" would mean verse 1.
+        $base = sprintf('%02d%03d', $book_num + 1, $chapter);
+        $url  = 'https://api.esv.org/v3/passage/text/?' . http_build_query([
+            'q'                           => "{$base}001-{$base}999",
+            'include-passage-references'  => 'false',
+            'include-first-verse-numbers' => 'true',
+            'include-footnotes'           => 'false',
+            'include-footnote-body'       => 'false',
+            'include-headings'            => 'false',
+            'include-short-copyright'     => 'false',
+            'indent-poetry'               => 'false',
+            'indent-paragraphs'           => '0',
+        ]);
+        $result = curl_get_json($url, ["Authorization: Token $esv_key"]);
+        if ($result['code'] === 401 || $result['code'] === 403) throw new RuntimeException('The server\'s ESV key was rejected.');
+        if ($result['code'] === 429) throw new RuntimeException('ESV request limit reached — try again shortly.');
+        if ($result['code'] !== 200) throw new RuntimeException("HTTP {$result['code']}");
+
+        // Text format: "[1] In the beginning… [2] The earth…"
+        $content = implode(' ', $result['body']['passages'] ?? []);
+        // Psalm 119's acrostic letter headings sit on lines of their own; drop them so
+        // "Beth" isn't glued to the end of verse 8.
+        $content = preg_replace('/^\s*(Aleph|Beth|Gimel|Daleth|He|Waw|Zayin|Heth|Teth|Yodh|Kaph|Lamedh|Mem|Nun|Samekh|Ayin|Pe|Tsadhe|Qoph|Resh|Shin|Taw)\s*$/m', '', $content);
+        $verses  = [];
+        preg_match_all('/\[(\d+)\]\s*(.*?)(?=\[\d+\]|$)/s', $content, $m, PREG_SET_ORDER);
+        foreach ($m as $match) {
+            $text = trim(preg_replace('/\s+/', ' ', $match[2]));
+            if ($text) $verses[] = ['verse' => (int)$match[1], 'text' => $text];
+        }
+        if (!$verses) throw new RuntimeException('No verses returned');
+        echo json_encode(['verses' => $verses, 'citation' => $ESV_CITATION, 'citation_url' => 'https://www.esv.org'],
+                         JSON_UNESCAPED_UNICODE);
+    } elseif (str_starts_with($translation, 'apibible:')) {
         $bible_name = substr($translation, 9);
         $bible_id   = $APIBIBLE_IDS[$bible_name] ?? null;
         if (!$bible_id) throw new RuntimeException("Unknown translation: $bible_name");

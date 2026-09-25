@@ -60,6 +60,7 @@ const BIBLE_TRANSLATIONS = [
     ['CSB (API.Bible)','apibible:CSB'],
     ['NLT (API.Bible)','apibible:NLT'],
     ['NIV (API.Bible)','apibible:NIV'],
+    ['English Standard Version','esv'],
 ];
 
 /* ── State ─────────────────────────────────────────────────────────── */
@@ -1945,7 +1946,7 @@ async function loadDaily() {
             if (requestedDate !== dailyDate || requestedTrans !== bibleState.translation) return; // user navigated away
             body.innerHTML = '';
             const verses = [];
-            let citation = '';
+            let citation = '', citationUrl = '';
             for (let k = 0; k < results.length; k++) {
                 const data = results[k], seg = r.segments[k];
                 if (data.error) { body.textContent = data.error; return; }
@@ -1961,8 +1962,9 @@ async function loadDaily() {
                 if (r.segments.length > 1) vs = vs.map(v => ({ verse: `${seg.chapter}:${v.verse}`, text: v.text }));
                 verses.push(...vs);
                 citation = data.citation || citation;
+                citationUrl = data.citation_url || citationUrl;
             }
-            if (verses.length) renderVerses(body, verses, citation);
+            if (verses.length) renderVerses(body, verses, citation, citationUrl);
         } catch(e) {
             if (requestedDate !== dailyDate) return;
             body.textContent = 'Could not load reading: ' + e.message;
@@ -2077,11 +2079,11 @@ function renderBibleChapter(data) {
 
     if (data.error) { textDiv.textContent = data.error; return; }
 
-    renderVerses(textDiv, data.verses || [], data.citation);
+    renderVerses(textDiv, data.verses || [], data.citation, data.citation_url);
 }
 
 // Render a verse list into `container`, grouped into paragraphs of 5 verses.
-function renderVerses(container, verses, citation) {
+function renderVerses(container, verses, citation, citationUrl) {
     if (!verses.length) { container.textContent = 'No text available.'; return; }
     for (let i = 0; i < verses.length; i += 5) {
         const p = el('p', { class: 'bible-paragraph' });
@@ -2093,7 +2095,13 @@ function renderVerses(container, verses, citation) {
         container.appendChild(p);
     }
     if (citation) {
-        container.appendChild(el('span', { class: 'bible-citation' }, citation));
+        const cite = el('span', { class: 'bible-citation' }, citation);
+        if (citationUrl) {
+            // ESV terms require a link to esv.org wherever the text is shown
+            cite.appendChild(document.createTextNode(' '));
+            cite.appendChild(el('a', { href: citationUrl, target: '_blank', rel: 'noopener' }, citationUrl.replace(/^https?:\/\//, '')));
+        }
+        container.appendChild(cite);
     }
 }
 

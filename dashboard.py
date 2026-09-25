@@ -301,6 +301,8 @@ BIBLE_TRANSLATIONS = [
     ("CSB (API.Bible)", "apibible:CSB"),
     ("NLT (API.Bible)", "apibible:NLT"),
     ("NIV (API.Bible)", "apibible:NIV"),
+    # Appended last: the saved "bible_translation" pref is an index into this list
+    ("English Standard Version", "esv"),
 ]
 
 # The seven divisions of the year (plus the Day 365 capstone), from
@@ -330,6 +332,10 @@ _APIBIBLE_CITATIONS = {
     "NLT": "Holy Bible, New Living Translation, Copyright © 2014, Tyndale House Publishers. All rights reserved. tyndale.com",
     "NIV": "The Holy Bible, New International Version® NIV® Copyright © 1973, 1978, 1984, 2011 by Biblica, Inc.® Used by Permission of Biblica, Inc.® All rights reserved worldwide.",
 }
+
+# Crossway's ESV API terms require this notice and a link to esv.org wherever the text is shown.
+_ESV_CITATION = ("Scripture quotations are from the ESV® Bible (The Holy Bible, English Standard Version®), "
+                 "© 2001 by Crossway, a publishing ministry of Good News Publishers. Used by permission. All rights reserved.")
 
 # Four sequential reading streams for the M'Cheyne daily Bible reading plan.
 # Jan 1 starts at: Gen 1 | Ezra 1 | Matt 1 | Acts 1.
@@ -1276,7 +1282,7 @@ def daily_readings_for_date(date=None):
 
 def filter_verse_range(text, v_from, v_to, chapter_prefix=None):
     """Keep only verses v_from..v_to from chapter text with "[n]" markers
-    (as returned by fetch_esv_chapter / fetch_apibible_chapter), regrouped
+    (as returned by fetch_bibleapi_chapter / fetch_apibible_chapter / fetch_esv_chapter), regrouped
     into paragraphs of 5.  With chapter_prefix, markers become "[c:n]" (for
     readings that span chapters).  Text without markers is returned unchanged."""
     import re
@@ -1294,7 +1300,7 @@ def filter_verse_range(text, v_from, v_to, chapter_prefix=None):
     paragraphs = [" ".join(verses[i:i + 5]) for i in range(0, len(verses), 5)]
     return "\n\n".join(paragraphs)
 
-def fetch_esv_chapter(book_id, chapter, translation="web"):
+def fetch_bibleapi_chapter(book_id, chapter, translation="web"):
     """Fetch a chapter from bible-api.com in paragraph format."""
     try:
         url = f"https://bible-api.com/data/{translation}/{book_id}/{chapter}"
@@ -1319,6 +1325,50 @@ def fetch_esv_chapter(book_id, chapter, translation="web"):
                 return "\n\n".join(paragraphs)
             return "No text available for this translation."
         return f"Could not load chapter (HTTP {r.status_code})"
+    except Exception as e:
+        return f"Error: {e}"
+
+def fetch_esv_chapter(book_id, chapter, api_key):
+    """Fetch a chapter of the ESV from api.esv.org (Crossway)."""
+    import re
+    if not api_key:
+        return "No ESV API key set — add one in Preferences."
+    book_num = next((i + 1 for i, b in enumerate(BIBLE_BOOKS) if b[1] == book_id), None)
+    if book_num is None:
+        return f"Unknown book: {book_id}"
+    # Verse-ID range (BBCCCVVV) covers the whole chapter, including
+    # single-chapter books, where "Jude 1" would mean verse 1.
+    base = f"{book_num:02d}{chapter:03d}"
+    try:
+        r = requests.get(
+            "https://api.esv.org/v3/passage/text/",
+            headers={"Authorization": f"Token {api_key}", "User-Agent": "MorningDashboard/1.0"},
+            params={
+                "q": f"{base}001-{base}999",
+                "include-passage-references": "false",
+                "include-first-verse-numbers": "true",
+                "include-footnotes": "false",
+                "include-footnote-body": "false",
+                "include-headings": "false",
+                "include-short-copyright": "false",
+                "indent-poetry": "false",
+                "indent-paragraphs": "0",
+            },
+            timeout=10,
+        )
+        if r.status_code in (401, 403):
+            return "Invalid ESV API key — check your key in Preferences."
+        if r.status_code == 429:
+            return "ESV request limit reached — try again shortly."
+        if r.status_code != 200:
+            return f"Could not load chapter (HTTP {r.status_code})"
+        content = " ".join(r.json().get("passages", []))
+        # Psalm 119's acrostic letter headings sit on lines of their own; drop them
+        # so "Beth" isn't glued to the end of verse 8.
+        content = re.sub(r"^\s*(Aleph|Beth|Gimel|Daleth|He|Waw|Zayin|Heth|Teth|Yodh|Kaph|Lamedh"
+                         r"|Mem|Nun|Samekh|Ayin|Pe|Tsadhe|Qoph|Resh|Shin|Taw)\s*$", "", content, flags=re.M)
+        # Collapse poetry line breaks, then regroup into paragraphs of 5 verses
+        return filter_verse_range(" ".join(content.split()), None, None)
     except Exception as e:
         return f"Error: {e}"
 
@@ -1757,6 +1807,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
                     self.visible_tabs.append(key)
         self.api_bible_key = self.prefs.get("api_bible_key", "")
         self.claude_api_key = self.prefs.get("claude_api_key", "")
+        self.esv_api_key = self.prefs.get("esv_api_key", "")
         self.spurgeon_paned_position = self.prefs.get("spurgeon_paned_position", 700)
         self.web_url  = self.prefs.get("web_url", "")
         self.web_user = self.prefs.get("web_user", "")
@@ -2833,6 +2884,35 @@ class MorningDashboard(Gtk.ApplicationWindow):
         bible_key_row.append(show_key_btn)
         box.append(bible_key_row)
 
+        esv_row0 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        esv_pre = Gtk.Label(label="ESV API key from")
+        esv_pre.add_css_class("date-label")
+        esv_link = Gtk.LinkButton.new_with_label("https://api.esv.org", "api.esv.org")
+        esv_link.add_css_class("date-label")
+        esv_post = Gtk.Label(label="— required for the ESV (free for non-commercial use).")
+        esv_post.add_css_class("date-label")
+        esv_row0.set_halign(Gtk.Align.START)
+        esv_row0.append(esv_pre)
+        esv_row0.append(esv_link)
+        esv_row0.append(esv_post)
+        box.append(esv_row0)
+
+        esv_key_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        esv_key_lbl = Gtk.Label(label="ESV key:")
+        esv_key_lbl.set_halign(Gtk.Align.START)
+        esv_key_entry = Gtk.Entry()
+        esv_key_entry.set_text(self.esv_api_key)
+        esv_key_entry.set_placeholder_text("Paste your ESV API key here…")
+        esv_key_entry.set_hexpand(True)
+        esv_key_entry.set_visibility(False)
+        esv_key_entry.set_input_purpose(Gtk.InputPurpose.PASSWORD)
+        show_esv_key_btn = Gtk.CheckButton(label="Show")
+        show_esv_key_btn.connect("toggled", lambda b: esv_key_entry.set_visibility(b.get_active()))
+        esv_key_row.append(esv_key_lbl)
+        esv_key_row.append(esv_key_entry)
+        esv_key_row.append(show_esv_key_btn)
+        box.append(esv_key_row)
+
         # ── Claude API key (Spurgeon modernisation) ────────────────────────────
         claude_header = Gtk.Label(label="DEVOTIONAL — MODERN ENGLISH (CLAUDE API)")
         claude_header.add_css_class("source-label")
@@ -3014,6 +3094,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 web_user_entry.get_text().strip(),
                 web_pass_entry.get_text(),
                 claude_key_entry.get_text().strip(),
+                esv_key_entry.get_text().strip(),
             )
             if startup_check.get_active():
                 os.makedirs(os.path.dirname(AUTOSTART_FILE), exist_ok=True)
@@ -3198,7 +3279,7 @@ X-GNOME-Autostart-enabled=true
         dialog.set_child(outer)
         dialog.present()
 
-    def _save_prefs(self, font_size, theme, weather_location, weather_lat, weather_lon, enabled_calendars, visible_tabs, tab_order, api_bible_key="", web_url="", web_user="", web_pass="", claude_api_key=""):
+    def _save_prefs(self, font_size, theme, weather_location, weather_lat, weather_lon, enabled_calendars, visible_tabs, tab_order, api_bible_key="", web_url="", web_user="", web_pass="", claude_api_key="", esv_api_key=""):
         self.font_size = font_size
         self.theme = theme
         self.weather_location = weather_location
@@ -3212,6 +3293,7 @@ X-GNOME-Autostart-enabled=true
         self.web_user = web_user
         self.web_pass = web_pass
         self.claude_api_key = claude_api_key
+        self.esv_api_key = esv_api_key
         self.prefs.update({
             "font_size": font_size,
             "theme": theme,
@@ -3226,6 +3308,7 @@ X-GNOME-Autostart-enabled=true
             "web_user": web_user,
             "web_pass": web_pass,
             "claude_api_key": claude_api_key,
+            "esv_api_key": esv_api_key,
         })
         save_prefs(self.prefs)
         self._apply_css()
@@ -4596,12 +4679,7 @@ X-GNOME-Autostart-enabled=true
 
         trans_idx = min(self.prefs.get("bible_translation", 0), len(BIBLE_TRANSLATIONS) - 1)
         trans_id = BIBLE_TRANSLATIONS[trans_idx][1]
-        if trans_id.startswith("apibible:"):
-            citation = _APIBIBLE_CITATIONS.get(trans_id[len("apibible:"):], "")
-            self.daily_citation_label.set_text(citation)
-            self.daily_citation_label.set_visible(bool(citation))
-        else:
-            self.daily_citation_label.set_visible(False)
+        self._show_citation(self.daily_citation_label, trans_id)
 
         threading.Thread(
             target=self._load_daily, args=(self._daily_date, readings, trans_id), daemon=True
@@ -4616,10 +4694,7 @@ X-GNOME-Autostart-enabled=true
                 cache_key = (trans_id, book_id, chapter)
                 text = self._daily_cache.get(cache_key)
                 if text is None:
-                    if trans_id.startswith("apibible:"):
-                        text = fetch_apibible_chapter(book_id, chapter, trans_id[len("apibible:"):], self.api_bible_key)
-                    else:
-                        text = fetch_esv_chapter(book_id, chapter, trans_id)
+                    text = self._fetch_chapter(book_id, chapter, trans_id)
                     # Only cache real chapter text, not error messages
                     if "[" in text:
                         self._daily_cache[cache_key] = text
@@ -5773,13 +5848,7 @@ X-GNOME-Autostart-enabled=true
         trans_id   = BIBLE_TRANSLATIONS[trans_idx][1]
         self.bible_ref_label.set_text(f"{book_name} {chapter}  —  {trans_name}")
         self.bible_buffer.set_text("Loading…")
-        if trans_id.startswith("apibible:"):
-            bible_name = trans_id[len("apibible:"):]
-            citation = _APIBIBLE_CITATIONS.get(bible_name, "")
-            self.bible_citation_label.set_text(citation)
-            self.bible_citation_label.set_visible(bool(citation))
-        else:
-            self.bible_citation_label.set_visible(False)
+        self._show_citation(self.bible_citation_label, trans_id)
         threading.Thread(
             target=self._fetch_and_set_bible,
             args=(book_id, chapter, trans_id),
@@ -5787,11 +5856,26 @@ X-GNOME-Autostart-enabled=true
         ).start()
 
     def _fetch_and_set_bible(self, book_id, chapter, trans_id):
+        GLib.idle_add(self._set_bible_text, self._fetch_chapter(book_id, chapter, trans_id))
+
+    def _fetch_chapter(self, book_id, chapter, trans_id):
+        """Chapter text with "[n]" verse markers for any BIBLE_TRANSLATIONS id."""
+        if trans_id == "esv":
+            return fetch_esv_chapter(book_id, chapter, self.esv_api_key)
         if trans_id.startswith("apibible:"):
-            text = fetch_apibible_chapter(book_id, chapter, trans_id[len("apibible:"):], self.api_bible_key)
-        else:
-            text = fetch_esv_chapter(book_id, chapter, trans_id)
-        GLib.idle_add(self._set_bible_text, text)
+            return fetch_apibible_chapter(book_id, chapter, trans_id[len("apibible:"):], self.api_bible_key)
+        return fetch_bibleapi_chapter(book_id, chapter, trans_id)
+
+    def _show_citation(self, label, trans_id):
+        """Show the copyright notice a translation requires (hidden for public-domain ones)."""
+        if trans_id == "esv":
+            label.set_markup(GLib.markup_escape_text(_ESV_CITATION)
+                             + ' <a href="https://www.esv.org">esv.org</a>')
+            label.set_visible(True)
+            return
+        citation = _APIBIBLE_CITATIONS.get(trans_id[len("apibible:"):], "") if trans_id.startswith("apibible:") else ""
+        label.set_text(citation)
+        label.set_visible(bool(citation))
 
     def _set_bible_text(self, text):
         self._fill_bible_buffer(self.bible_buffer, text)
