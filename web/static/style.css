@@ -960,6 +960,7 @@ body.guest #content { padding-bottom: calc(40px + env(safe-area-inset-bottom, 0p
 }
 
 .bible-paragraph { margin-bottom: 12px; }
+.psalm-title { font-style: italic; color: var(--subtext); margin-bottom: 10px; }
 
 .bible-citation {
     font-size: calc(var(--font-size) - 3px);

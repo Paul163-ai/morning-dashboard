@@ -1284,11 +1284,14 @@ def filter_verse_range(text, v_from, v_to, chapter_prefix=None):
     """Keep only verses v_from..v_to from chapter text with "[n]" markers
     (as returned by fetch_bibleapi_chapter / fetch_apibible_chapter / fetch_esv_chapter), regrouped
     into paragraphs of 5.  With chapter_prefix, markers become "[c:n]" (for
-    readings that span chapters).  Text without markers is returned unchanged."""
+    readings that span chapters).  Text before the first marker (a Psalm
+    title) is kept when the range starts at verse 1.  Text without markers
+    is returned unchanged."""
     import re
     parts = re.split(r'\[(\d+)\]\s*', text)
     if len(parts) < 3:
         return text
+    title = parts[0].strip() if v_from in (None, 1) else ""
     verses = []
     for i in range(1, len(parts) - 1, 2):
         n = int(parts[i])
@@ -1298,7 +1301,7 @@ def filter_verse_range(text, v_from, v_to, chapter_prefix=None):
     if not verses:
         return "No text available for these verses."
     paragraphs = [" ".join(verses[i:i + 5]) for i in range(0, len(verses), 5)]
-    return "\n\n".join(paragraphs)
+    return "\n\n".join(([title] if title else []) + paragraphs)
 
 def fetch_bibleapi_chapter(book_id, chapter, translation="web"):
     """Fetch a chapter from bible-api.com in paragraph format."""
@@ -1372,6 +1375,51 @@ def fetch_esv_chapter(book_id, chapter, api_key):
     except Exception as e:
         return f"Error: {e}"
 
+def parse_apibible_json(nodes):
+    """Walk API.Bible content-type=json nodes into (title, [(verse, text)]).
+    The title is the Psalm superscription (para style "d"); section headings
+    (s/ms/mr/r/sp/qa/cl/mt…, e.g. Psalm 119's Hebrew letters) and notes are
+    dropped.  Web counterpart: parse_apibible_json() in web/api/bible.php."""
+    import re
+    title, verses, state = [], {}, {"cur": None}
+
+    def walk(items, in_title):
+        for n in items or []:
+            attrs = n.get("attrs") or {}
+            if n.get("type") == "text":
+                text = n.get("text", "")
+                vid = attrs.get("verseId")
+                if in_title:
+                    title.append(text)
+                    continue
+                v = int(vid.split(".")[-1]) if vid and vid.split(".")[-1].isdigit() else state["cur"]
+                if v is not None:
+                    verses[v] = verses.get(v, "") + text
+                continue
+            name, style = n.get("name"), attrs.get("style", "")
+            if name == "verse":
+                m = re.match(r"\d+", str(attrs.get("number", "")))
+                if m:
+                    state["cur"] = int(m.group())
+                continue  # children are just the verse number
+            if name == "note" or style in ("f", "fe", "x"):
+                continue
+            if name == "para":
+                if style == "d":
+                    walk(n.get("items"), True)
+                    title.append(" ")
+                    continue
+                if re.match(r"(s|ms|mr|r|sp|qa|cl|mt)\d*$", style):
+                    continue
+            walk(n.get("items"), in_title)
+            if name == "para":
+                for v in verses:  # keep words from adjacent poetry lines apart
+                    verses[v] += " "
+
+    walk(nodes, False)
+    clean = lambda s: re.sub(r"\s+", " ", s).strip()
+    return clean("".join(title)), [(v, clean(t)) for v, t in sorted(verses.items()) if clean(t)]
+
 def fetch_apibible_chapter(book_id, chapter, bible_name, api_key):
     """Fetch a chapter from api.scripture.api.bible."""
     import re
@@ -1380,6 +1428,26 @@ def fetch_apibible_chapter(book_id, chapter, bible_name, api_key):
     bible_id = _APIBIBLE_IDS.get(bible_name)
     if not bible_id:
         return f"Unknown API.Bible translation: {bible_name}"
+    if book_id == "PSA":
+        # JSON marks the superscription separately from section headings;
+        # the title goes before the first "[1]" marker.
+        try:
+            r = requests.get(
+                f"https://rest.api.bible/v1/bibles/{bible_id}/chapters/PSA.{chapter}",
+                headers={"api-key": api_key, "User-Agent": "MorningDashboard/1.0"},
+                params={"content-type": "json", "include-verse-numbers": "true",
+                        "include-chapter-numbers": "false", "include-titles": "true",
+                        "include-notes": "false"},
+                timeout=10,
+            )
+            if r.status_code == 200:
+                title, verses = parse_apibible_json(r.json().get("data", {}).get("content", []))
+                if verses:
+                    parts = [f"[{v}] {t}" for v, t in verses]
+                    body = "\n\n".join(" ".join(parts[i:i + 5]) for i in range(0, len(parts), 5))
+                    return f"{title}\n\n{body}" if title else body
+        except Exception:
+            pass  # fall through to the plain-text request
     try:
         chapter_id = f"{book_id}.{chapter}"
         url = f"https://rest.api.bible/v1/bibles/{bible_id}/chapters/{chapter_id}"
@@ -5891,6 +5959,14 @@ X-GNOME-Autostart-enabled=true
             sup_tag = buf.create_tag("verse-num", rise=6000, scale=0.72, foreground="#888888")
         pattern = re.compile(r'\[(\d+(?::\d+)?)\] ?')
         pos = 0
+        first = pattern.search(text)
+        if first and first.start() > 0 and text[:first.start()].strip():
+            # Psalm title ahead of verse 1
+            title_tag = tag_table.lookup("psalm-title")
+            if title_tag is None:
+                title_tag = buf.create_tag("psalm-title", style=Pango.Style.ITALIC)
+            buf.insert_with_tags(buf.get_end_iter(), text[:first.start()], title_tag)
+            pos = first.start()
         for m in pattern.finditer(text):
             if m.start() > pos:
                 buf.insert(buf.get_end_iter(), text[pos:m.start()])
