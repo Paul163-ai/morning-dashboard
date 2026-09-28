@@ -58,6 +58,51 @@ function curl_get_json(string $url, array $headers = []): array {
     return ['body' => $data, 'code' => $code];
 }
 
+// Walk API.Bible content-type=json nodes into [title, [['verse'=>n,'text'=>…]]].
+// The title is the Psalm superscription (para style "d"); section headings
+// (s/ms/mr/r/sp/qa/cl/mt…, e.g. Psalm 119's Hebrew letters) and notes are
+// dropped. Desktop counterpart: parse_apibible_json() in dashboard.py.
+function parse_apibible_json(array $nodes): array {
+    $title = ''; $verses = []; $cur = null;
+    $walk = function (array $items, bool $in_title) use (&$walk, &$title, &$verses, &$cur) {
+        foreach ($items as $n) {
+            $attrs = $n['attrs'] ?? [];
+            if (($n['type'] ?? '') === 'text') {
+                $text = $n['text'] ?? '';
+                if ($in_title) { $title .= $text; continue; }
+                $vid  = $attrs['verseId'] ?? '';
+                $last = $vid !== '' ? substr(strrchr('.' . $vid, '.'), 1) : '';
+                $v    = ctype_digit($last) ? (int)$last : $cur;
+                if ($v !== null) $verses[$v] = ($verses[$v] ?? '') . $text;
+                continue;
+            }
+            $name  = $n['name'] ?? '';
+            $style = $attrs['style'] ?? '';
+            if ($name === 'verse') {
+                if (preg_match('/^\d+/', (string)($attrs['number'] ?? ''), $m)) $cur = (int)$m[0];
+                continue; // children are just the verse number
+            }
+            if ($name === 'note' || in_array($style, ['f', 'fe', 'x'], true)) continue;
+            if ($name === 'para') {
+                if ($style === 'd') { $walk($n['items'] ?? [], true); $title .= ' '; continue; }
+                if (preg_match('/^(s|ms|mr|r|sp|qa|cl|mt)\d*$/', $style)) continue;
+            }
+            $walk($n['items'] ?? [], $in_title);
+            if ($name === 'para') {
+                foreach ($verses as $k => $t) $verses[$k] = $t . ' '; // keep poetry lines apart
+            }
+        }
+    };
+    $walk($nodes, false);
+    ksort($verses);
+    $clean = fn($s) => trim(preg_replace('/\s+/u', ' ', $s));
+    $out = [];
+    foreach ($verses as $v => $t) {
+        if (($t = $clean($t)) !== '') $out[] = ['verse' => $v, 'text' => $t];
+    }
+    return [$clean($title), $out];
+}
+
 try {
     if ($translation === 'esv') {
         $book_num = array_search($book_id, $ESV_BOOKS, true);
@@ -97,13 +142,34 @@ try {
             if ($text) $verses[] = ['verse' => (int)$match[1], 'text' => $text];
         }
         if (!$verses) throw new RuntimeException('No verses returned');
-        echo json_encode(['verses' => $verses, 'citation' => $ESV_CITATION, 'citation_url' => 'https://www.esv.org'],
+        // A Psalm's title comes before "[1]" (desktop keeps it too, via filter_verse_range)
+        $title = $book_id === 'PSA' ? trim(preg_replace('/\s+/', ' ', strstr($content, '[', true) ?: '')) : '';
+        echo json_encode(['verses' => $verses, 'title' => $title, 'citation' => $ESV_CITATION, 'citation_url' => 'https://www.esv.org'],
                          JSON_UNESCAPED_UNICODE);
     } elseif (str_starts_with($translation, 'apibible:')) {
         $bible_name = substr($translation, 9);
         $bible_id   = $APIBIBLE_IDS[$bible_name] ?? null;
         if (!$bible_id) throw new RuntimeException("Unknown translation: $bible_name");
         if (!$api_key) throw new RuntimeException('No API.Bible key — add one in Settings.');
+
+        if ($book_id === 'PSA') {
+            // JSON marks the superscription separately from section headings
+            $url = "https://rest.api.bible/v1/bibles/{$bible_id}/chapters/PSA.{$chapter}"
+                 . "?content-type=json&include-verse-numbers=true&include-chapter-numbers=false"
+                 . "&include-titles=true&include-notes=false";
+            try {
+                $result = curl_get_json($url, ["api-key: $api_key"]);
+                if ($result['code'] === 200) {
+                    [$title, $verses] = parse_apibible_json((array)($result['body']['data']['content'] ?? []));
+                    if ($verses) {
+                        echo json_encode(['verses' => $verses, 'title' => $title,
+                                          'citation' => $APIBIBLE_CITATIONS[$bible_name] ?? ''],
+                                         JSON_UNESCAPED_UNICODE);
+                        exit;
+                    }
+                }
+            } catch (Exception $e) {} // fall through to the plain-text request
+        }
 
         $chapter_id = "{$book_id}.{$chapter}";
         $url = "https://rest.api.bible/v1/bibles/{$bible_id}/chapters/{$chapter_id}"

@@ -1946,7 +1946,7 @@ async function loadDaily() {
             if (requestedDate !== dailyDate || requestedTrans !== bibleState.translation) return; // user navigated away
             body.innerHTML = '';
             const verses = [];
-            let citation = '', citationUrl = '';
+            let citation = '', citationUrl = '', title = '';
             for (let k = 0; k < results.length; k++) {
                 const data = results[k], seg = r.segments[k];
                 if (data.error) { body.textContent = data.error; return; }
@@ -1960,11 +1960,13 @@ async function loadDaily() {
                 if (seg.vFrom != null) vs = vs.filter(v => v.verse >= seg.vFrom && v.verse <= seg.vTo);
                 // Prefix chapter number when a reading spans chapters (e.g. "14:1")
                 if (r.segments.length > 1) vs = vs.map(v => ({ verse: `${seg.chapter}:${v.verse}`, text: v.text }));
+                // Psalm title only when the reading starts at verse 1
+                if (k === 0 && data.title && (seg.vFrom == null || seg.vFrom === 1)) title = data.title;
                 verses.push(...vs);
                 citation = data.citation || citation;
                 citationUrl = data.citation_url || citationUrl;
             }
-            if (verses.length) renderVerses(body, verses, citation, citationUrl);
+            if (verses.length) renderVerses(body, verses, citation, citationUrl, title);
         } catch(e) {
             if (requestedDate !== dailyDate) return;
             body.textContent = 'Could not load reading: ' + e.message;
@@ -2079,12 +2081,14 @@ function renderBibleChapter(data) {
 
     if (data.error) { textDiv.textContent = data.error; return; }
 
-    renderVerses(textDiv, data.verses || [], data.citation, data.citation_url);
+    renderVerses(textDiv, data.verses || [], data.citation, data.citation_url, data.title);
 }
 
-// Render a verse list into `container`, grouped into paragraphs of 5 verses.
-function renderVerses(container, verses, citation, citationUrl) {
+// Render a verse list into `container`, grouped into paragraphs of 5 verses,
+// with an optional Psalm title above.
+function renderVerses(container, verses, citation, citationUrl, title) {
     if (!verses.length) { container.textContent = 'No text available.'; return; }
+    if (title) container.appendChild(el('p', { class: 'psalm-title' }, title));
     for (let i = 0; i < verses.length; i += 5) {
         const p = el('p', { class: 'bible-paragraph' });
         for (let j = i; j < Math.min(i+5, verses.length); j++) {
