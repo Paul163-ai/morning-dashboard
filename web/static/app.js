@@ -18,6 +18,7 @@ const TAB_META = {
 const RESOURCE_LINKS = [
     { title: 'John Owen', desc: 'Writings and resources on John Owen', url: 'https://paullintott.uk/john-owen' },
     { title: 'John Calvin', desc: 'Writings and resources on John Calvin', url: 'https://paullintott.uk/john-calvin' },
+    { title: 'John Flavel', desc: 'Writings and resources on John Flavel', url: 'https://paullintott.uk/john-flavel' },
 ];
 
 const BIBLE_BOOKS = [

@@ -1738,6 +1738,7 @@ ALL_TABS = ["daily", "spurgeon", "systematics", "news", "weather", "sermons", "c
 RESOURCE_LINKS = [
     ("John Owen", "Writings and resources on John Owen", "https://paullintott.uk/john-owen"),
     ("John Calvin", "Writings and resources on John Calvin", "https://paullintott.uk/john-calvin"),
+    ("John Flavel", "Writings and resources on John Flavel", "https://paullintott.uk/john-flavel"),
 ]
 
 def load_prefs():
