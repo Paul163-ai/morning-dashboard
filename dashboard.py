@@ -1736,14 +1736,14 @@ SPURGEON_ORIGINAL_CACHE_FILE = os.path.expanduser("~/.config/morning-dashboard/s
 ALL_TABS = ["daily", "spurgeon", "systematics", "news", "weather", "sermons", "calendar", "bible", "prayer", "notes", "resources"]
 
 RESOURCE_LINKS = [
-    ("John Owen", "The Mortification of Sin, in modern English", "https://paullintott.uk/john-owen"),
-    ("John Owen: Communion with God", "Fellowship with the Father, Son and Holy Spirit, in modern English", "https://paullintott.uk/communion-with-god"),
-    ("John Calvin", "The Institutes of the Christian Religion, in modern English", "https://paullintott.uk/john-calvin"),
-    ("John Flavel", "The Mystery of Providence, in modern English", "https://paullintott.uk/john-flavel"),
-    ("Richard Sibbes", "The Bruised Reed and Smoking Flax, in modern English", "https://paullintott.uk/richard-sibbes"),
-    ("William Perkins", "The Art of Prophesying, in modern English", "https://paullintott.uk/william-perkins"),
-    ("Augustine of Hippo", "On the Trinity, in modern English", "https://paullintott.uk/augustine"),
-    ("Octavius Winslow", "Personal Declension and Revival of Religion in the Soul, in modern English", "https://paullintott.uk/octavius-winslow"),
+    ("John Owen: The Mortification of Sin", "Owen's searching guide to putting sin to death by the Spirit, instead of merely managing it", "https://paullintott.uk/john-owen"),
+    ("John Owen: Communion with God", "Fellowship with the Father in love, the Son in grace, and the Holy Spirit in comfort", "https://paullintott.uk/communion-with-god"),
+    ("John Calvin: The Institutes of the Christian Religion", "All four books of Calvin's great summary of the faith, with summaries of each book", "https://paullintott.uk/john-calvin"),
+    ("John Flavel: The Mystery of Providence", "How to see God's hand governing every part of life, from Psalm 57:2", "https://paullintott.uk/john-flavel"),
+    ("Richard Sibbes: The Bruised Reed and Smoking Flax", "A gentle book on the tenderness of Christ toward the weak, from Isaiah 42:3", "https://paullintott.uk/richard-sibbes"),
+    ("William Perkins: The Art of Prophesying", "The founding Puritan handbook on preaching: how to open the Word and apply it to the hearers", "https://paullintott.uk/william-perkins"),
+    ("Augustine of Hippo: On the Trinity", "Fifteen books on the God who is one and yet Father, Son and Holy Spirit", "https://paullintott.uk/augustine"),
+    ("Octavius Winslow: Personal Declension and Revival of Religion in the Soul", "How a believer's love, faith and prayer quietly cool, and how Christ restores and keeps the soul", "https://paullintott.uk/octavius-winslow"),
     ("Rooted", "A simple book for those wanting to know how to begin following Jesus", "https://paullintott.uk/book"),
     ("Lives That Shaped the Church", "Short biographies of eight people God used to shape the church", "https://paullintott.uk/lives-that-shaped-the-church"),
 ]
@@ -2337,6 +2337,15 @@ class MorningDashboard(Gtk.ApplicationWindow):
             .source-label {{
                 font-size: {fs - 2}px; font-weight: bold;
                 color: {accent}; padding: 10px 0 4px 0;
+            }}
+            button.resource-link, button.resource-link:link, button.resource-link:visited,
+            button.resource-link:hover, button.resource-link label {{
+                color: {text if dark else '#000000'};
+                font-weight: bold;
+            }}
+            .resource-desc {{
+                font-size: {fs - 2}px;
+                color: {'#a0a0a0' if dark else '#666666'};
             }}
             .status-label {{
                 color: {status_col}; font-style: italic;
@@ -5013,10 +5022,13 @@ X-GNOME-Autostart-enabled=true
 
             link = Gtk.LinkButton.new_with_label(url, name)
             link.set_halign(Gtk.Align.START)
+            link.add_css_class("resource-link")
             card.append(link)
 
             desc_label = Gtk.Label(label=desc)
-            desc_label.add_css_class("source-label")
+            desc_label.set_wrap(True)
+            desc_label.set_xalign(0)
+            desc_label.add_css_class("resource-desc")
             desc_label.set_halign(Gtk.Align.START)
             card.append(desc_label)
 

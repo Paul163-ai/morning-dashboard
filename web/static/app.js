@@ -16,14 +16,14 @@ const TAB_META = {
 };
 
 const RESOURCE_LINKS = [
-    { title: 'John Owen', desc: 'The Mortification of Sin, in modern English', url: 'https://paullintott.uk/john-owen' },
-    { title: 'John Owen: Communion with God', desc: 'Fellowship with the Father, Son and Holy Spirit, in modern English', url: 'https://paullintott.uk/communion-with-god' },
-    { title: 'John Calvin', desc: 'The Institutes of the Christian Religion, in modern English', url: 'https://paullintott.uk/john-calvin' },
-    { title: 'John Flavel', desc: 'The Mystery of Providence, in modern English', url: 'https://paullintott.uk/john-flavel' },
-    { title: 'Richard Sibbes', desc: 'The Bruised Reed and Smoking Flax, in modern English', url: 'https://paullintott.uk/richard-sibbes' },
-    { title: 'William Perkins', desc: 'The Art of Prophesying, in modern English', url: 'https://paullintott.uk/william-perkins' },
-    { title: 'Augustine of Hippo', desc: 'On the Trinity, in modern English', url: 'https://paullintott.uk/augustine' },
-    { title: 'Octavius Winslow', desc: 'Personal Declension and Revival of Religion in the Soul, in modern English', url: 'https://paullintott.uk/octavius-winslow' },
+    { title: 'John Owen: The Mortification of Sin', desc: 'Owen\'s searching guide to putting sin to death by the Spirit, instead of merely managing it', url: 'https://paullintott.uk/john-owen' },
+    { title: 'John Owen: Communion with God', desc: 'Fellowship with the Father in love, the Son in grace, and the Holy Spirit in comfort', url: 'https://paullintott.uk/communion-with-god' },
+    { title: 'John Calvin: The Institutes of the Christian Religion', desc: 'All four books of Calvin\'s great summary of the faith, with summaries of each book', url: 'https://paullintott.uk/john-calvin' },
+    { title: 'John Flavel: The Mystery of Providence', desc: 'How to see God\'s hand governing every part of life, from Psalm 57:2', url: 'https://paullintott.uk/john-flavel' },
+    { title: 'Richard Sibbes: The Bruised Reed and Smoking Flax', desc: 'A gentle book on the tenderness of Christ toward the weak, from Isaiah 42:3', url: 'https://paullintott.uk/richard-sibbes' },
+    { title: 'William Perkins: The Art of Prophesying', desc: 'The founding Puritan handbook on preaching: how to open the Word and apply it to the hearers', url: 'https://paullintott.uk/william-perkins' },
+    { title: 'Augustine of Hippo: On the Trinity', desc: 'Fifteen books on the God who is one and yet Father, Son and Holy Spirit', url: 'https://paullintott.uk/augustine' },
+    { title: 'Octavius Winslow: Personal Declension and Revival of Religion in the Soul', desc: 'How a believer\'s love, faith and prayer quietly cool, and how Christ restores and keeps the soul', url: 'https://paullintott.uk/octavius-winslow' },
     { title: 'Rooted', desc: 'A simple book for those wanting to know how to begin following Jesus', url: 'https://paullintott.uk/book' },
     { title: 'Lives That Shaped the Church', desc: 'Short biographies of eight people God used to shape the church', url: 'https://paullintott.uk/lives-that-shaped-the-church' },
 ];
