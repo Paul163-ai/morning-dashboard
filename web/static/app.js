@@ -16,9 +16,16 @@ const TAB_META = {
 };
 
 const RESOURCE_LINKS = [
-    { title: 'John Owen', desc: 'Writings and resources on John Owen', url: 'https://paullintott.uk/john-owen' },
-    { title: 'John Calvin', desc: 'Writings and resources on John Calvin', url: 'https://paullintott.uk/john-calvin' },
-    { title: 'John Flavel', desc: 'Writings and resources on John Flavel', url: 'https://paullintott.uk/john-flavel' },
+    { title: 'John Owen', desc: 'The Mortification of Sin, in modern English', url: 'https://paullintott.uk/john-owen' },
+    { title: 'John Owen: Communion with God', desc: 'Fellowship with the Father, Son and Holy Spirit, in modern English', url: 'https://paullintott.uk/communion-with-god' },
+    { title: 'John Calvin', desc: 'The Institutes of the Christian Religion, in modern English', url: 'https://paullintott.uk/john-calvin' },
+    { title: 'John Flavel', desc: 'The Mystery of Providence, in modern English', url: 'https://paullintott.uk/john-flavel' },
+    { title: 'Richard Sibbes', desc: 'The Bruised Reed and Smoking Flax, in modern English', url: 'https://paullintott.uk/richard-sibbes' },
+    { title: 'William Perkins', desc: 'The Art of Prophesying, in modern English', url: 'https://paullintott.uk/william-perkins' },
+    { title: 'Augustine of Hippo', desc: 'On the Trinity, in modern English', url: 'https://paullintott.uk/augustine' },
+    { title: 'Octavius Winslow', desc: 'Personal Declension and Revival of Religion in the Soul, in modern English', url: 'https://paullintott.uk/octavius-winslow' },
+    { title: 'Rooted', desc: 'A simple book for those wanting to know how to begin following Jesus', url: 'https://paullintott.uk/book' },
+    { title: 'Lives That Shaped the Church', desc: 'Short biographies of eight people God used to shape the church', url: 'https://paullintott.uk/lives-that-shaped-the-church' },
 ];
 
 const BIBLE_BOOKS = [

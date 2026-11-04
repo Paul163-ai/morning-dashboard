@@ -1736,9 +1736,16 @@ SPURGEON_ORIGINAL_CACHE_FILE = os.path.expanduser("~/.config/morning-dashboard/s
 ALL_TABS = ["daily", "spurgeon", "systematics", "news", "weather", "sermons", "calendar", "bible", "prayer", "notes", "resources"]
 
 RESOURCE_LINKS = [
-    ("John Owen", "Writings and resources on John Owen", "https://paullintott.uk/john-owen"),
-    ("John Calvin", "Writings and resources on John Calvin", "https://paullintott.uk/john-calvin"),
-    ("John Flavel", "Writings and resources on John Flavel", "https://paullintott.uk/john-flavel"),
+    ("John Owen", "The Mortification of Sin, in modern English", "https://paullintott.uk/john-owen"),
+    ("John Owen: Communion with God", "Fellowship with the Father, Son and Holy Spirit, in modern English", "https://paullintott.uk/communion-with-god"),
+    ("John Calvin", "The Institutes of the Christian Religion, in modern English", "https://paullintott.uk/john-calvin"),
+    ("John Flavel", "The Mystery of Providence, in modern English", "https://paullintott.uk/john-flavel"),
+    ("Richard Sibbes", "The Bruised Reed and Smoking Flax, in modern English", "https://paullintott.uk/richard-sibbes"),
+    ("William Perkins", "The Art of Prophesying, in modern English", "https://paullintott.uk/william-perkins"),
+    ("Augustine of Hippo", "On the Trinity, in modern English", "https://paullintott.uk/augustine"),
+    ("Octavius Winslow", "Personal Declension and Revival of Religion in the Soul, in modern English", "https://paullintott.uk/octavius-winslow"),
+    ("Rooted", "A simple book for those wanting to know how to begin following Jesus", "https://paullintott.uk/book"),
+    ("Lives That Shaped the Church", "Short biographies of eight people God used to shape the church", "https://paullintott.uk/lives-that-shaped-the-church"),
 ]
 
 def load_prefs():
