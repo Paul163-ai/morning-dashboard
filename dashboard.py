@@ -2341,6 +2341,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
             button.resource-link, button.resource-link:link, button.resource-link:visited,
             button.resource-link:hover, button.resource-link label {{
                 color: {text if dark else '#000000'};
+                font-size: {fs + 2}px;
                 font-weight: bold;
             }}
             .resource-desc {{
