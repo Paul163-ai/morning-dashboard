@@ -28,6 +28,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Translation code shared by the Bible and Daily Bible tabs (e.g. 'web', 'apibible:NIV')
     $bible_translation          = (string)($body['bible_translation'] ?? 'web');
     $prefs['bible_translation'] = preg_match('/^[A-Za-z0-9:-]{1,30}$/', $bible_translation) ? $bible_translation : 'web';
+    // Default commentary for the Bible tab's Commentary view (see api/commentary.php)
+    $commentary                  = (string)($body['default_commentary'] ?? 'matthew-henry');
+    $prefs['default_commentary'] = in_array($commentary, ['matthew-henry','john-calvin','jamieson-fausset-brown','john-gill','adam-clarke','keil-delitzsch','tyndale'], true) ? $commentary : 'matthew-henry';
 
     $tab_order    = array_filter((array)($body['tab_order']    ?? $ALL_TABS), fn($k) => in_array($k, $ALL_TABS));
     $visible_tabs = array_filter((array)($body['visible_tabs'] ?? $ALL_TABS), fn($k) => in_array($k, $ALL_TABS));

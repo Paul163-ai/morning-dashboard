@@ -1303,10 +1303,76 @@ def filter_verse_range(text, v_from, v_to, chapter_prefix=None):
     paragraphs = [" ".join(verses[i:i + 5]) for i in range(0, len(verses), 5)]
     return "\n\n".join(([title] if title else []) + paragraphs)
 
+# Free Use Bible API commentaries (bible.helloao.org): (display name, id)
+COMMENTARIES = [
+    ("Matthew Henry", "matthew-henry"),
+    ("John Calvin", "john-calvin"),
+    ("Jamieson-Fausset-Brown", "jamieson-fausset-brown"),
+    ("John Gill", "john-gill"),
+    ("Adam Clarke", "adam-clarke"),
+    ("Keil & Delitzsch (OT)", "keil-delitzsch"),
+    ("Tyndale Study Notes", "tyndale"),
+]
+COMMENTARY_IDS = [c[1] for c in COMMENTARIES]
+COMMENTARY_CACHE_DIR = os.path.expanduser("~/.config/morning-dashboard/commentary_cache")
+
+def fetch_commentary_chapter(commentary_id, book_id, chapter):
+    """One chapter of a commentary, trimmed to {name, website, license_url,
+    book_intro, intro, sections: [{verse, text}]}, or {"missing": True} when the
+    commentary doesn't cover it, or {"error": msg}.  Cached on disk under
+    COMMENTARY_CACHE_DIR/{id}/{BOOK}/{chapter}.json so read chapters work offline.
+    Web counterpart: web/api/commentary.php (same format)."""
+    cache_file = os.path.join(COMMENTARY_CACHE_DIR, commentary_id, book_id, f"{chapter}.json")
+    try:
+        with open(cache_file, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        pass
+    api_book = "NAM" if book_id == "NAH" else book_id   # helloao's id for Nahum
+    try:
+        r = requests.get(f"https://bible.helloao.org/api/c/{commentary_id}/{api_book}/{chapter}.json",
+                         timeout=15, headers={"User-Agent": "MorningDashboard/1.0"})
+    except requests.RequestException:
+        return {"error": "Could not reach the commentary service — this chapter isn't saved for offline use yet."}
+    if r.status_code == 404:
+        out = {"missing": True}
+    else:
+        try:
+            data = r.json() if r.status_code == 200 else None
+            content = data["chapter"]["content"]
+        except (ValueError, KeyError, TypeError):
+            return {"error": f"Commentary service unavailable (HTTP {r.status_code}) — try again later."}
+        sections = []
+        for item in content:
+            if item.get("type") != "verse" or "number" not in item:
+                continue
+            parts = [p.strip() for p in item.get("content") or [] if isinstance(p, str) and p.strip()]
+            if parts:
+                sections.append({"verse": int(item["number"]), "text": "\n".join(parts)})
+        info = data.get("commentary") or {}
+        out = {
+            "name": info.get("name") or commentary_id,
+            "website": info.get("website") or "",
+            "license_url": info.get("licenseUrl") or "",
+            "book_intro": (data.get("book") or {}).get("introduction", "").strip() if chapter == 1 else "",
+            "intro": (data["chapter"].get("introduction") or "").strip(),
+            "sections": sections,
+        }
+    try:
+        os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+        tmp = cache_file + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(out, f, ensure_ascii=False)
+        os.replace(tmp, cache_file)
+    except OSError:
+        pass
+    return out
+
 def fetch_bibleapi_chapter(book_id, chapter, translation="web"):
     """Fetch a chapter from bible-api.com in paragraph format."""
     try:
-        url = f"https://bible-api.com/data/{translation}/{book_id}/{chapter}"
+        api_book = "NAM" if book_id == "NAH" else book_id   # bible-api.com's id for Nahum
+        url = f"https://bible-api.com/data/{translation}/{api_book}/{chapter}"
         r = requests.get(url, timeout=10,
                          headers={"User-Agent": "MorningDashboard/1.0"})
         if r.status_code == 200:
@@ -2132,6 +2198,8 @@ class MorningDashboard(Gtk.ApplicationWindow):
             GLib.source_remove(self._spurgeon_notes_save_id)
             self._spurgeon_notes_save()
 
+        if hasattr(self, "_bible_split"):
+            self.prefs["bible_split"] = round(self._bible_split, 3)
         w, h = self.get_width(), self.get_height()
         if w > 0 and h > 0:
             self.prefs["window_width"] = w
@@ -2999,6 +3067,20 @@ class MorningDashboard(Gtk.ApplicationWindow):
         esv_key_row.append(show_esv_key_btn)
         box.append(esv_key_row)
 
+        # ── Default commentary (Bible tab → Commentary) ────────────────────────
+        comm_header = Gtk.Label(label="BIBLE COMMENTARY")
+        comm_header.add_css_class("source-label")
+        comm_header.set_halign(Gtk.Align.START)
+        box.append(comm_header)
+        comm_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        comm_lbl = Gtk.Label(label="Default commentary:")
+        comm_lbl.set_halign(Gtk.Align.START)
+        comm_default_combo = Gtk.DropDown.new_from_strings([c[0] for c in COMMENTARIES])
+        comm_default_combo.set_selected(COMMENTARY_IDS.index(self._default_commentary()))
+        comm_row.append(comm_lbl)
+        comm_row.append(comm_default_combo)
+        box.append(comm_row)
+
         # ── Claude API key (Spurgeon modernisation) ────────────────────────────
         claude_header = Gtk.Label(label="DEVOTIONAL — MODERN ENGLISH (CLAUDE API)")
         claude_header.add_css_class("source-label")
@@ -3181,6 +3263,7 @@ class MorningDashboard(Gtk.ApplicationWindow):
                 web_pass_entry.get_text(),
                 claude_key_entry.get_text().strip(),
                 esv_key_entry.get_text().strip(),
+                default_commentary=COMMENTARY_IDS[comm_default_combo.get_selected()],
             )
             if startup_check.get_active():
                 os.makedirs(os.path.dirname(AUTOSTART_FILE), exist_ok=True)
@@ -3365,7 +3448,12 @@ X-GNOME-Autostart-enabled=true
         dialog.set_child(outer)
         dialog.present()
 
-    def _save_prefs(self, font_size, theme, weather_location, weather_lat, weather_lon, enabled_calendars, visible_tabs, tab_order, api_bible_key="", web_url="", web_user="", web_pass="", claude_api_key="", esv_api_key=""):
+    def _save_prefs(self, font_size, theme, weather_location, weather_lat, weather_lon, enabled_calendars, visible_tabs, tab_order, api_bible_key="", web_url="", web_user="", web_pass="", claude_api_key="", esv_api_key="", default_commentary=None):
+        if default_commentary in COMMENTARY_IDS and default_commentary != self._default_commentary():
+            # A new default takes effect straight away in the Bible tab
+            self.prefs["default_commentary"] = default_commentary
+            if hasattr(self, "bible_comm_combo"):
+                self.bible_comm_combo.set_selected(COMMENTARY_IDS.index(default_commentary))
         self.font_size = font_size
         self.theme = theme
         self.weather_location = weather_location
@@ -5815,6 +5903,11 @@ X-GNOME-Autostart-enabled=true
         self._bible_book_idx    = saved_book
         self._bible_chapter     = saved_ch
         self._bible_translation = saved_trans
+        # Text and commentary sit side by side. The commentary starts at the
+        # Preferences default; the dropdown changes it for this session only.
+        self._bible_commentary = self._default_commentary()
+        self._bible_verse_counts = {}      # (book_id, chapter) -> last verse number
+        self._commentary_shown = None      # (commentary, book_id, chapter, used_verse_count)
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         outer.add_css_class("tab-content")
@@ -5874,6 +5967,22 @@ X-GNOME-Autostart-enabled=true
 
         outer.append(toolbar)
 
+        # ── Text (left) and commentary (right) in a draggable split ─────────
+        self._bible_paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        self._bible_paned.set_vexpand(True)
+        self._bible_paned.set_wide_handle(True)
+        self._bible_paned.set_shrink_start_child(False)
+        self._bible_paned.set_shrink_end_child(False)
+        # The divider keeps its share of the width as the window resizes;
+        # dragging it changes that share (saved as "bible_split" on close).
+        frac = self.prefs.get("bible_split", 0.5)
+        self._bible_split = frac if isinstance(frac, (int, float)) and 0.15 <= frac <= 0.85 else 0.5
+        self._bible_split_placing = False
+        self._bible_paned.connect("notify::max-position", self._on_bible_paned_sized)
+        self._bible_paned.connect("notify::position", self._on_bible_paned_moved)
+        text_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        text_page.set_size_request(200, -1)
+
         # ── Text area ─────────────────────────────────────────────────────────
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -5893,7 +6002,7 @@ X-GNOME-Autostart-enabled=true
         self.bible_buffer.set_text("Select a book and chapter above.")
 
         scroll.set_child(self.bible_view)
-        outer.append(scroll)
+        text_page.append(scroll)
 
         self.bible_citation_label = Gtk.Label()
         self.bible_citation_label.add_css_class("bible-citation")
@@ -5903,8 +6012,53 @@ X-GNOME-Autostart-enabled=true
         self.bible_citation_label.set_margin_end(12)
         self.bible_citation_label.set_margin_bottom(6)
         self.bible_citation_label.set_visible(False)
-        outer.append(self.bible_citation_label)
+        text_page.append(self.bible_citation_label)
+        self._bible_paned.set_start_child(text_page)
 
+        # ── Commentary area ───────────────────────────────────────────────────
+        comm_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        comm_page.set_size_request(200, -1)
+        comm_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        comm_header.set_margin_start(12)
+        comm_header_lbl = Gtk.Label(label="💬 Commentary:")
+        comm_header_lbl.add_css_class("source-label")
+        comm_header.append(comm_header_lbl)
+        self.bible_comm_combo = Gtk.DropDown.new_from_strings([c[0] for c in COMMENTARIES])
+        self.bible_comm_combo.set_selected(COMMENTARY_IDS.index(self._bible_commentary))
+        self.bible_comm_combo.connect("notify::selected", self._on_bible_commentary_changed)
+        comm_header.append(self.bible_comm_combo)
+        comm_page.append(comm_header)
+        self._comm_scroll = Gtk.ScrolledWindow()
+        self._comm_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._comm_scroll.set_vexpand(True)
+        self.comm_buffer = Gtk.TextBuffer()
+        self.comm_buffer.create_tag("comm-title", weight=Pango.Weight.BOLD, scale=1.15)
+        self.comm_buffer.create_tag("comm-heading", weight=Pango.Weight.BOLD)
+        self.comm_buffer.create_tag("comm-status", style=Pango.Style.ITALIC)
+        comm_view = Gtk.TextView(buffer=self.comm_buffer)
+        comm_view.set_editable(False)
+        comm_view.set_cursor_visible(False)
+        comm_view.set_wrap_mode(Gtk.WrapMode.WORD)
+        comm_view.set_left_margin(12)
+        comm_view.set_right_margin(12)
+        comm_view.set_top_margin(10)
+        comm_view.set_bottom_margin(10)
+        comm_view.set_pixels_below_lines(6)
+        comm_view.add_css_class("bible-verse")
+        self._comm_scroll.set_child(comm_view)
+        comm_page.append(self._comm_scroll)
+        self.comm_source_label = Gtk.Label()
+        self.comm_source_label.add_css_class("bible-citation")
+        self.comm_source_label.set_wrap(True)
+        self.comm_source_label.set_halign(Gtk.Align.START)
+        self.comm_source_label.set_margin_start(12)
+        self.comm_source_label.set_margin_end(12)
+        self.comm_source_label.set_margin_bottom(6)
+        self.comm_source_label.set_visible(False)
+        comm_page.append(self.comm_source_label)
+        self._bible_paned.set_end_child(comm_page)
+
+        outer.append(self._bible_paned)
         self.stack.add_named(outer, "bible")
 
         self._do_load_bible(saved_book, saved_ch)
@@ -5943,9 +6097,10 @@ X-GNOME-Autostart-enabled=true
             args=(book_id, chapter, trans_id),
             daemon=True
         ).start()
+        self._load_commentary()
 
     def _fetch_and_set_bible(self, book_id, chapter, trans_id):
-        GLib.idle_add(self._set_bible_text, self._fetch_chapter(book_id, chapter, trans_id))
+        GLib.idle_add(self._set_bible_text, self._fetch_chapter(book_id, chapter, trans_id), book_id, chapter)
 
     def _fetch_chapter(self, book_id, chapter, trans_id):
         """Chapter text with "[n]" verse markers for any BIBLE_TRANSLATIONS id."""
@@ -5966,8 +6121,111 @@ X-GNOME-Autostart-enabled=true
         label.set_text(citation)
         label.set_visible(bool(citation))
 
-    def _set_bible_text(self, text):
+    def _set_bible_text(self, text, book_id=None, chapter=None):
         self._fill_bible_buffer(self.bible_buffer, text)
+        if book_id is None:
+            return
+        import re
+        nums = [int(n) for n in re.findall(r'\[(\d+)\]', text)]
+        if nums:
+            self._bible_verse_counts[(book_id, chapter)] = max(nums)
+            # Commentary shown before the text arrived: redo its last verse range
+            shown = self._commentary_shown
+            if shown and shown[1:3] == (book_id, chapter) and not shown[3]:
+                self._load_commentary()
+
+    # ── Commentary (right-hand side of the Bible tab) ─────────────────────────
+
+    def _default_commentary(self):
+        cid = self.prefs.get("default_commentary")
+        return cid if cid in COMMENTARY_IDS else "matthew-henry"
+
+    def _on_bible_paned_sized(self, paned, _):
+        """Re-place the text/commentary divider at its share of the new width."""
+        # (max-position is the width less the commentary's minimum width, so
+        # the share is taken of the full width and only clamped to max-position)
+        width, max_pos = paned.get_width(), paned.get_property("max-position")
+        if width <= 0 or max_pos <= 0:
+            return
+        self._bible_split_placing = True
+        paned.set_position(min(max_pos, int(width * self._bible_split)))
+        self._bible_split_placing = False
+
+    def _on_bible_paned_moved(self, paned, _):
+        width = paned.get_width()
+        if self._bible_split_placing or width <= 0:
+            return
+        self._bible_split = min(0.85, max(0.15, paned.get_position() / width))
+
+    def _on_bible_commentary_changed(self, combo, _):
+        self._bible_commentary = COMMENTARY_IDS[combo.get_selected()]
+        self._load_commentary()
+
+    def _load_commentary(self):
+        """Show the selected commentary on the chapter the Bible tab is showing."""
+        key = (self._bible_commentary, BIBLE_BOOKS[self._bible_book_idx][1], self._bible_chapter)
+        self._commentary_key = key
+        self.comm_buffer.set_text("")
+        self.comm_buffer.insert_with_tags_by_name(self.comm_buffer.get_end_iter(), "Loading commentary…", "comm-status")
+        self.comm_source_label.set_visible(False)
+
+        def worker():
+            data = fetch_commentary_chapter(*key)
+            GLib.idle_add(self._render_commentary, key, data)
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _render_commentary(self, key, data):
+        if key != getattr(self, "_commentary_key", None):
+            return False  # the user moved on while this was loading
+        cid, book_id, chapter = key
+        book_name = BIBLE_BOOKS[self._bible_book_idx][0]
+        comm_name = COMMENTARIES[COMMENTARY_IDS.index(cid)][0]
+        buf = self.comm_buffer
+        buf.set_text("")
+        end = buf.get_end_iter
+        last_verse = self._bible_verse_counts.get((book_id, chapter))
+        self._commentary_shown = (cid, book_id, chapter, last_verse is not None)
+        self._comm_scroll.get_vadjustment().set_value(0)
+
+        if data.get("error"):
+            buf.insert_with_tags_by_name(end(), data["error"], "comm-status")
+            return False
+        sections = data.get("sections") or []
+        if data.get("missing") or (not sections and not data.get("intro")):
+            buf.insert_with_tags_by_name(end(),
+                f"{comm_name} has no commentary on {book_name} {chapter}. Try another commentary from the list above.",
+                "comm-status")
+            return False
+
+        def paras(text):
+            for p in text.split("\n"):
+                if p.strip():
+                    buf.insert(end(), p.strip() + "\n")
+
+        buf.insert_with_tags_by_name(end(), f"{data.get('name') or comm_name}: {book_name} {chapter}\n", "comm-title")
+        if data.get("book_intro"):
+            buf.insert_with_tags_by_name(end(), f"\nIntroduction to {book_name}\n", "comm-heading")
+            paras(data["book_intro"])
+        if data.get("intro"):
+            paras(data["intro"])
+        for i, sec in enumerate(sections):
+            nxt = sections[i + 1]["verse"] - 1 if i + 1 < len(sections) else last_verse
+            v = sec["verse"]
+            if nxt is None:
+                label = f"Verses {v}ff"
+            elif nxt <= v:
+                label = f"Verse {v}"
+            else:
+                label = f"Verses {v}–{nxt}"
+            buf.insert_with_tags_by_name(end(), f"\n{label}\n", "comm-heading")
+            paras(sec["text"])
+
+        source = GLib.markup_escape_text(f"Source: {data.get('name') or comm_name}, via the Free Use Bible API (bible.helloao.org).")
+        if data.get("license_url"):
+            source += f' <a href="{GLib.markup_escape_text(data["license_url"])}">Licence</a>'
+        self.comm_source_label.set_markup(source)
+        self.comm_source_label.set_visible(True)
+        return False
 
     def _fill_bible_buffer(self, buf, text):
         """Fill a TextBuffer with chapter text, rendering "[n]" verse markers

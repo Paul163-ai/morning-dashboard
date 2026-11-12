@@ -49,6 +49,7 @@ $init_prefs = json_encode([
     'weather_lon'       => $prefs['weather_lon']      ?? null,
     'spurgeon_version'  => $prefs['spurgeon_version'] ?? 'original',
     'bible_translation' => $prefs['bible_translation'] ?? 'web',
+    'default_commentary' => $prefs['default_commentary'] ?? 'matthew-henry',
     'api_bible_key_set' => !empty($prefs['api_bible_key']),
     'user_email'        => $guest ? '' : (get_user_email($username) ?? ''),
 ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE);

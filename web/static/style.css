@@ -970,6 +970,30 @@ body.guest #content { padding-bottom: calc(40px + env(safe-area-inset-bottom, 0p
     display: block;
 }
 
+/* Commentary sub-tab of the Bible tab. Panes stack as sub-tabs on narrow
+   screens and sit side by side (each scrolling on its own) from 900px up. */
+.bible-view-row { margin-bottom: 8px; }
+.bible-panes { display: flex; flex: 1; min-height: 0; gap: 24px; }
+.bible-pane  { flex: 1; min-width: 0; overflow-y: auto; }
+.bible-pane[hidden] { display: none; }
+@media (min-width: 900px) {
+    #bible-comm-pane { border-left: 1px solid var(--header-border); padding-left: 24px; }
+}
+#bible-commentary {
+    font-size: var(--font-size);
+    color: var(--reading);
+    line-height: 1.7;
+}
+.commentary-title { margin-bottom: 10px; }
+.commentary-verse {
+    font-weight: bold;
+    color: var(--accent);
+    margin: 18px 0 6px;
+}
+.commentary-paragraph { margin-bottom: 10px; }
+.commentary-book-intro { margin-bottom: 12px; }
+.commentary-book-intro summary { cursor: pointer; color: var(--subtext); margin-bottom: 8px; }
+
 .mcheyne-readings {
     display: flex;
     flex-wrap: wrap;

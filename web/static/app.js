@@ -71,6 +71,17 @@ const BIBLE_TRANSLATIONS = [
     ['English Standard Version','esv'],
 ];
 
+// Free Use Bible API commentaries (bible.helloao.org), proxied and cached by api/commentary.php
+const COMMENTARIES = [
+    ['Matthew Henry','matthew-henry'],
+    ['John Calvin','john-calvin'],
+    ['Jamieson-Fausset-Brown','jamieson-fausset-brown'],
+    ['John Gill','john-gill'],
+    ['Adam Clarke','adam-clarke'],
+    ['Keil & Delitzsch (OT)','keil-delitzsch'],
+    ['Tyndale Study Notes','tyndale'],
+];
+
 /* ── State ─────────────────────────────────────────────────────────── */
 const IS_GUEST = window.IS_GUEST === true;
 let prefs = window.INIT_PREFS;
@@ -88,8 +99,18 @@ let spurgeonVersion = (window.INIT_PREFS && window.INIT_PREFS.spurgeon_version =
 let spurgeonOriginalLoaded = false;
 let spurgeonModernLoaded = false;
 
-// Bible state
-let bibleState = { bookIdx: 0, chapter: 1, translation: loadSavedTranslation() };
+// Bible state. view: 'text' or 'commentary' (sub-tabs of the Bible tab).
+// commentary starts at the user's default (Settings) and the dropdown changes it for this visit.
+let bibleState = { bookIdx: 0, chapter: 1, translation: loadSavedTranslation(),
+                   view: 'text', commentary: loadDefaultCommentary() };
+const commentaryCache = {};   // "commentary|bookId|chapter" -> promise of commentary.php response
+const verseCounts = {};       // "bookId|chapter" -> number of verses, from the last text load
+
+function loadDefaultCommentary() {
+    let id = window.INIT_PREFS && window.INIT_PREFS.default_commentary;
+    if (IS_GUEST) { try { id = localStorage.getItem('default_commentary'); } catch(e) {} }
+    return COMMENTARIES.some(c => c[1] === id) ? id : 'matthew-henry';
+}
 
 // Translation persists per user in prefs (guests: this browser's localStorage)
 function loadSavedTranslation() {
@@ -2022,17 +2043,64 @@ function initBible() {
 
     const textDiv = el('div', { id: 'bible-text' },
         el('span', { class: 'status-label' }, 'Loading…'));
+    const commDiv = el('div', { id: 'bible-commentary' });
 
-    const scroll = el('div', { style: 'overflow-y:auto;flex:1' }, textDiv);
+    // Text / Commentary sub-tabs on narrow screens (the commentary dropdown only shows with
+    // the commentary); on wider screens the two sit side by side and the buttons are hidden
+    const textBtn = el('button', { class: 'sermon-btn', id: 'bible-view-text', onclick: () => setBibleView('text') }, '📜 Text');
+    const commBtn = el('button', { class: 'sermon-btn', id: 'bible-view-commentary', onclick: () => setBibleView('commentary') }, '💬 Commentary');
+    const commSel = el('select', { class: 'bible-select', id: 'bible-comm-sel',
+        onchange: () => {
+            bibleState.commentary = commSel.value;
+            if (IS_GUEST) { try { localStorage.setItem('default_commentary', commSel.value); } catch(e) {} }
+            loadCommentary();
+        } });
+    COMMENTARIES.forEach(([name, id]) => commSel.appendChild(el('option', { value: id }, name)));
+    commSel.value = bibleState.commentary;
+    const viewRow = el('div', { class: 'bible-controls bible-view-row' }, textBtn, commBtn, commSel);
+
+    const panes = el('div', { class: 'bible-panes' },
+        el('div', { class: 'bible-pane', id: 'bible-text-pane' }, textDiv),
+        el('div', { class: 'bible-pane', id: 'bible-comm-pane' }, commDiv));
 
     const box = el('div', { class: 'tab-content', style: 'display:flex;flex-direction:column;height:100%' },
         controls,
         el('div', { class: 'flex-row', style: 'margin-bottom:8px;flex-wrap:wrap' }, mcheyneLabel, mcheyneDiv),
-        scroll);
+        viewRow,
+        panes);
 
     panel.innerHTML = '';
     panel.appendChild(box);
+    setBibleView(bibleState.view);
     loadBibleChapter();
+}
+
+// Text and commentary side by side from this width up; sub-tabs below it
+const BIBLE_SPLIT_MQ = window.matchMedia('(min-width: 900px)');
+BIBLE_SPLIT_MQ.addEventListener('change', () => {
+    if (document.getElementById('bible-comm-pane')) setBibleView(bibleState.view, true);
+});
+
+function commentaryVisible() {
+    return BIBLE_SPLIT_MQ.matches || bibleState.view === 'commentary';
+}
+
+function setBibleView(view, keepScroll) {
+    bibleState.view = view;
+    const split  = BIBLE_SPLIT_MQ.matches;
+    const isComm = view === 'commentary';
+    document.getElementById('bible-view-text').hidden = split;
+    document.getElementById('bible-view-commentary').hidden = split;
+    document.getElementById('bible-view-text').classList.toggle('active', !isComm);
+    document.getElementById('bible-view-commentary').classList.toggle('active', isComm);
+    document.getElementById('bible-comm-sel').hidden = !commentaryVisible();
+    document.getElementById('bible-text-pane').hidden = !split && isComm;
+    document.getElementById('bible-comm-pane').hidden = !commentaryVisible();
+    if (!keepScroll) {
+        document.getElementById('bible-text-pane').scrollTop = 0;
+        document.getElementById('bible-comm-pane').scrollTop = 0;
+    }
+    if (commentaryVisible()) loadCommentary();
 }
 
 function applyBibleState() {
@@ -2069,14 +2137,27 @@ async function loadBibleChapter() {
     textDiv.innerHTML = '<span class="status-label">Loading…</span>';
 
     const book = BIBLE_BOOKS[bibleState.bookIdx];
+    const chapter = bibleState.chapter;
     const params = new URLSearchParams({
         book_id:     book[1],
-        chapter:     bibleState.chapter,
+        chapter:     chapter,
         translation: bibleState.translation,
     });
+    for (const id of ['bible-text-pane', 'bible-comm-pane']) {
+        const pane = document.getElementById(id);
+        if (pane) pane.scrollTop = 0;
+    }
+    if (commentaryVisible()) loadCommentary();
     try {
         const data = await api('bible.php?' + params);
         renderBibleChapter(data);
+        if (data && data.verses && data.verses.length) {
+            const key = `${book[1]}|${chapter}`;
+            const first = verseCounts[key] === undefined;
+            verseCounts[key] = Math.max(...data.verses.map(v => v.verse));
+            // Commentary rendered before the text arrived: redo it with exact verse ranges
+            if (first && commentaryVisible()) loadCommentary();
+        }
     } catch(e) {
         textDiv.textContent = 'Could not load chapter: ' + e.message;
     }
@@ -2115,6 +2196,74 @@ function renderVerses(container, verses, citation, citationUrl, title) {
         }
         container.appendChild(cite);
     }
+}
+
+/* Commentary sub-tab: follows the book/chapter the Bible tab is showing */
+async function loadCommentary() {
+    const div = document.getElementById('bible-commentary');
+    if (!div) return;
+    const book = BIBLE_BOOKS[bibleState.bookIdx];
+    const chapter = bibleState.chapter;
+    const id = bibleState.commentary;
+    const key = `${id}|${book[1]}|${chapter}`;
+    if (!commentaryCache[key]) {
+        div.innerHTML = '<span class="status-label">Loading commentary…</span>';
+        const params = new URLSearchParams({ commentary: id, book_id: book[1], chapter });
+        // Cache the promise so overlapping calls share one request; drop it on failure
+        commentaryCache[key] = api('commentary.php?' + params, {}, 30000).then(d => {
+            if (!d || d.error) delete commentaryCache[key];
+            return d;
+        }, e => {
+            delete commentaryCache[key];
+            return { error: 'Could not load commentary: ' + e.message };
+        });
+    }
+    const data = await commentaryCache[key];
+    // The user moved on while this was loading
+    if (key !== `${bibleState.commentary}|${BIBLE_BOOKS[bibleState.bookIdx][1]}|${bibleState.chapter}`) return;
+    renderCommentary(div, data, book[0], chapter, id);
+}
+
+function renderCommentary(div, data, bookName, chapter, id) {
+    div.innerHTML = '';
+    const commName = (COMMENTARIES.find(c => c[1] === id) || [id])[0];
+    if (!data || data.error) { div.textContent = (data && data.error) || 'No commentary available.'; return; }
+    if (data.missing || !data.sections || (!data.sections.length && !data.intro)) {
+        div.appendChild(el('p', { class: 'status-label' },
+            `${commName} has no commentary on ${bookName} ${chapter}. Try another commentary from the list above.`));
+        return;
+    }
+
+    const paras = (container, text, cls) => {
+        for (const p of text.split(/\n+/)) if (p.trim()) container.appendChild(el('p', { class: cls }, p.trim()));
+    };
+
+    div.appendChild(el('div', { class: 'section-title commentary-title' }, `${data.name || commName}: ${bookName} ${chapter}`));
+    if (data.book_intro) {
+        const det = el('details', { class: 'commentary-book-intro' }, el('summary', {}, `Introduction to ${bookName}`));
+        paras(det, data.book_intro, 'commentary-paragraph');
+        div.appendChild(det);
+    }
+    // Chapter introduction (Henry often expounds the opening verses here)
+    if (data.intro) paras(div, data.intro, 'commentary-paragraph');
+
+    const lastVerse = verseCounts[`${BIBLE_BOOKS[bibleState.bookIdx][1]}|${chapter}`];
+    data.sections.forEach((s, i) => {
+        const next = data.sections[i + 1];
+        const end = next ? next.verse - 1 : lastVerse;
+        let label;
+        if (end === undefined)      label = `Verses ${s.verse}ff`;
+        else if (end <= s.verse)    label = `Verse ${s.verse}`;
+        else                        label = `Verses ${s.verse}–${end}`;
+        div.appendChild(el('div', { class: 'commentary-verse' }, label));
+        paras(div, s.text, 'commentary-paragraph');
+    });
+
+    const src = el('span', { class: 'bible-citation' }, `Source: ${data.name || commName}, via the Free Use Bible API (bible.helloao.org). `);
+    if (data.license_url) {
+        src.appendChild(el('a', { href: data.license_url, target: '_blank', rel: 'noopener' }, 'Licence'));
+    }
+    div.appendChild(src);
 }
 
 function renderMcheyne(container) {
@@ -2722,6 +2871,7 @@ function openSettings() {
         weather_lat:      prefs.weather_lat,
         weather_lon:      prefs.weather_lon,
         api_bible_key:    prefs.api_bible_key,
+        default_commentary: prefs.default_commentary || 'matthew-henry',
         tab_order:        [...prefs.tab_order],
         visible_tabs:     [...prefs.visible_tabs],
         selected_loc:     null,
@@ -2798,6 +2948,17 @@ function renderSettingsBody() {
         keyRow.appendChild(el('span', { style: 'color:#66bb6a;font-size:12px' }, '✓ Set'));
     }
     body.appendChild(keyRow);
+
+    // Default commentary for the Bible tab's Commentary view
+    body.appendChild(el('div', { class: 'settings-section-label' }, 'BIBLE COMMENTARY'));
+    const commRow = el('div', { class: 'settings-row' });
+    commRow.appendChild(el('label', {}, 'Default commentary:'));
+    const commSel = el('select', { class: 'bible-select' });
+    COMMENTARIES.forEach(([name, id]) => commSel.appendChild(el('option', { value: id }, name)));
+    commSel.value = settingsState.default_commentary;
+    commSel.onchange = () => { settingsState.default_commentary = commSel.value; };
+    commRow.appendChild(commSel);
+    body.appendChild(commRow);
 
     // Tabs order & visibility
     body.appendChild(el('div', { class: 'settings-section-label' }, 'TABS — ORDER & VISIBILITY'));
@@ -2972,6 +3133,13 @@ async function saveSettings() {
     prefs.weather_lat      = settingsState.weather_lat;
     prefs.weather_lon      = settingsState.weather_lon;
     prefs.api_bible_key    = settingsState.api_bible_key || '';
+    if (prefs.default_commentary !== settingsState.default_commentary) {
+        // A new default takes effect straight away in the Bible tab
+        prefs.default_commentary = settingsState.default_commentary;
+        bibleState.commentary = prefs.default_commentary;
+        const sel = document.getElementById('bible-comm-sel');
+        if (sel) { sel.value = bibleState.commentary; if (commentaryVisible()) loadCommentary(); }
+    }
     prefs.tab_order        = settingsState.tab_order;
     prefs.visible_tabs     = settingsState.visible_tabs;
 

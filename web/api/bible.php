@@ -201,7 +201,9 @@ try {
         // bible-api.com codes are short lowercase ids (web, kjv, oeb-cw…);
         // anything else would be injected into the upstream URL path.
         if (!preg_match('/^[a-z0-9-]{2,12}$/', $translation)) throw new RuntimeException('Unknown translation');
-        $url    = "https://bible-api.com/data/{$translation}/{$book_id}/{$chapter}";
+        // bible-api.com calls Nahum NAM (the rest of the app uses NAH)
+        $api_book = $book_id === 'NAH' ? 'NAM' : $book_id;
+        $url    = "https://bible-api.com/data/{$translation}/{$api_book}/{$chapter}";
         $result = curl_get_json($url);
         if ($result['code'] !== 200) throw new RuntimeException("HTTP {$result['code']}");
 
