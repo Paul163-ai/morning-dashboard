@@ -2045,8 +2045,8 @@ function initBible() {
         el('span', { class: 'status-label' }, 'Loading…'));
     const commDiv = el('div', { id: 'bible-commentary' });
 
-    // Text / Commentary sub-tabs on narrow screens (the commentary dropdown only shows with
-    // the commentary); on wider screens the two sit side by side and the buttons are hidden
+    // Text / Commentary sub-tabs on narrow screens; on wider screens the two sit side by
+    // side and the buttons are hidden. The commentary dropdown heads the commentary column.
     const textBtn = el('button', { class: 'sermon-btn', id: 'bible-view-text', onclick: () => setBibleView('text') }, '📜 Text');
     const commBtn = el('button', { class: 'sermon-btn', id: 'bible-view-commentary', onclick: () => setBibleView('commentary') }, '💬 Commentary');
     const commSel = el('select', { class: 'bible-select', id: 'bible-comm-sel',
@@ -2057,11 +2057,13 @@ function initBible() {
         } });
     COMMENTARIES.forEach(([name, id]) => commSel.appendChild(el('option', { value: id }, name)));
     commSel.value = bibleState.commentary;
-    const viewRow = el('div', { class: 'bible-controls bible-view-row' }, textBtn, commBtn, commSel);
+    const viewRow = el('div', { class: 'bible-controls bible-view-row', id: 'bible-view-row' }, textBtn, commBtn);
+    const commHeader = el('div', { class: 'bible-comm-header' },
+        el('span', { class: 'source-label' }, '💬 Commentary:'), commSel);
 
     const panes = el('div', { class: 'bible-panes' },
         el('div', { class: 'bible-pane', id: 'bible-text-pane' }, textDiv),
-        el('div', { class: 'bible-pane', id: 'bible-comm-pane' }, commDiv));
+        el('div', { class: 'bible-pane', id: 'bible-comm-pane' }, commHeader, commDiv));
 
     const box = el('div', { class: 'tab-content', style: 'display:flex;flex-direction:column;height:100%' },
         controls,
@@ -2089,11 +2091,9 @@ function setBibleView(view, keepScroll) {
     bibleState.view = view;
     const split  = BIBLE_SPLIT_MQ.matches;
     const isComm = view === 'commentary';
-    document.getElementById('bible-view-text').hidden = split;
-    document.getElementById('bible-view-commentary').hidden = split;
+    document.getElementById('bible-view-row').hidden = split;
     document.getElementById('bible-view-text').classList.toggle('active', !isComm);
     document.getElementById('bible-view-commentary').classList.toggle('active', isComm);
-    document.getElementById('bible-comm-sel').hidden = !commentaryVisible();
     document.getElementById('bible-text-pane').hidden = !split && isComm;
     document.getElementById('bible-comm-pane').hidden = !commentaryVisible();
     if (!keepScroll) {

@@ -976,6 +976,18 @@ body.guest #content { padding-bottom: calc(40px + env(safe-area-inset-bottom, 0p
 .bible-panes { display: flex; flex: 1; min-height: 0; gap: 24px; }
 .bible-pane  { flex: 1; min-width: 0; overflow-y: auto; }
 .bible-pane[hidden] { display: none; }
+.bible-view-row[hidden] { display: none; }
+/* Commentary dropdown at the top of the commentary column, kept in view while it scrolls */
+.bible-comm-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--bg);
+    padding-bottom: 10px;
+}
 @media (min-width: 900px) {
     #bible-comm-pane { border-left: 1px solid var(--header-border); padding-left: 24px; }
 }
